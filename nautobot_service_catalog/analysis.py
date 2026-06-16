@@ -32,6 +32,18 @@ class FetchedFile:
 
 
 @dataclass(frozen=True)
+class CatalogDependency:
+    """One normalized Backstage dependency reference."""
+
+    raw_ref: str
+    kind: str
+    namespace: str
+    name: str
+    dependency_type: str
+    resolution_status: str = "unresolved"
+
+
+@dataclass(frozen=True)
 class RepositoryAnalysisResult:
     """Analysis output for a set of repository entries."""
 
@@ -132,6 +144,7 @@ def analyze_repository(
         for entity in entities
         if (service := _entity_to_desired_service(entity, repository, catalog_file)) is not None
     ]
+    dependency_summary = _service_dependency_summary(services)
     status = "catalog_parsed" if services else "insufficient"
     reasons = ["desired_services_generated"] if services else ["catalog_info_found_but_no_service_component"]
     return (
@@ -148,6 +161,7 @@ def analyze_repository(
             "fetched_basic_files": [file.path for file in basic_files],
             "catalog_entity_count": len(entities),
             "generated_service_count": len(services),
+            **dependency_summary,
         },
         services,
     )
@@ -334,6 +348,103 @@ def _catalog_entities(catalog_file: FetchedFile) -> list[dict[str, Any]]:
     return entities
 
 
+def _parse_dependency_ref(raw_ref: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Normalize a Backstage entity reference used in spec.dependsOn."""
+
+    if not isinstance(raw_ref, str):
+        return None, {"raw_ref": str(raw_ref), "reason": "invalid_entity_ref"}
+
+    raw_ref = raw_ref.strip()
+    if not raw_ref:
+        return None, {"raw_ref": raw_ref, "reason": "invalid_entity_ref"}
+
+    kind = "component"
+    entity_ref = raw_ref
+    if ":" in raw_ref:
+        kind_part, entity_ref = raw_ref.split(":", 1)
+        kind_part = kind_part.strip().lower()
+        if not kind_part:
+            return None, {"raw_ref": raw_ref, "reason": "invalid_entity_ref"}
+        kind = kind_part
+
+    entity_ref = entity_ref.strip()
+    if not entity_ref or entity_ref.count("/") > 1:
+        return None, {"raw_ref": raw_ref, "reason": "invalid_entity_ref"}
+
+    namespace = "default"
+    name = entity_ref
+    if "/" in entity_ref:
+        namespace, name = [part.strip() for part in entity_ref.split("/", 1)]
+
+    kind = kind.strip().lower()
+    namespace = namespace.strip().lower()
+    name = name.strip()
+    if not kind or not namespace or not name:
+        return None, {"raw_ref": raw_ref, "reason": "invalid_entity_ref"}
+
+    dependency = CatalogDependency(
+        raw_ref=raw_ref,
+        kind=kind,
+        namespace=namespace,
+        name=name,
+        dependency_type=kind,
+    )
+    return asdict(dependency), None
+
+
+def _entity_dependencies(entity: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    entity_spec = entity.get("spec") if isinstance(entity.get("spec"), dict) else {}
+    depends_on = entity_spec.get("dependsOn")
+    if depends_on is None:
+        return [], []
+    if isinstance(depends_on, str):
+        depends_on = [depends_on]
+    if not isinstance(depends_on, list):
+        return [], [{"raw_ref": str(depends_on), "reason": "depends_on_must_be_list"}]
+
+    dependencies = []
+    malformed = []
+    for raw_ref in depends_on:
+        dependency, error = _parse_dependency_ref(raw_ref)
+        if dependency is not None:
+            dependencies.append(dependency)
+        if error is not None:
+            malformed.append(error)
+    return dependencies, malformed
+
+
+def _service_dependency_summary(services: list[dict[str, Any]]) -> dict[str, Any]:
+    dependencies = [
+        dependency
+        for service in services
+        for dependency in service.get("dependencies", [])
+        if isinstance(dependency, dict)
+    ]
+    malformed = [
+        malformed_dependency
+        for service in services
+        for malformed_dependency in service.get("analysis", {}).get("malformed_dependencies", [])
+        if isinstance(malformed_dependency, dict)
+    ]
+    kinds = sorted({str(dependency.get("kind")) for dependency in dependencies if dependency.get("kind")})
+    summary = {
+        "dependency_count": len(dependencies),
+        "unresolved_dependencies": sorted(
+            {
+                str(dependency["raw_ref"])
+                for dependency in dependencies
+                if dependency.get("resolution_status") == "unresolved" and dependency.get("raw_ref")
+            }
+        ),
+        "malformed_dependencies": malformed,
+    }
+    for kind in kinds:
+        summary[f"{kind}_dependency_count"] = sum(
+            1 for dependency in dependencies if dependency.get("kind") == kind
+        )
+    return summary
+
+
 def _entity_to_desired_service(
     entity: dict[str, Any],
     repository: RepositoryEntry,
@@ -354,6 +465,19 @@ def _entity_to_desired_service(
     owner = repository.owner or entity_spec.get("owner")
     description = metadata.get("description")
     notes = description if isinstance(description, str) and description else "Generated from Backstage catalog metadata."
+    dependencies, malformed_dependencies = _entity_dependencies(entity)
+    analysis_reasons = ["backstage_component_catalog_found"]
+    if dependencies:
+        analysis_reasons.append("backstage_dependencies_found")
+    if malformed_dependencies:
+        analysis_reasons.append("backstage_dependency_refs_malformed")
+    analysis = {
+        "status": "catalog_derived",
+        "confidence": "medium",
+        "reasons": analysis_reasons,
+    }
+    if malformed_dependencies:
+        analysis["malformed_dependencies"] = malformed_dependencies
 
     service = {
         "name": name,
@@ -369,6 +493,7 @@ def _entity_to_desired_service(
             "ref": catalog_file.ref,
             "catalog_path": catalog_file.path,
         },
+        "dependencies": dependencies,
         "catalog": {
             "kind": kind,
             "metadata_name": metadata.get("name"),
@@ -377,11 +502,7 @@ def _entity_to_desired_service(
             "owner": owner,
             "system": entity_spec.get("system"),
         },
-        "analysis": {
-            "status": "catalog_derived",
-            "confidence": "medium",
-            "reasons": ["backstage_component_catalog_found"],
-        },
+        "analysis": analysis,
         "notes": notes,
     }
     return _plain_value(service)

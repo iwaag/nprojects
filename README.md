@@ -55,6 +55,7 @@ After restarting Nautobot, open:
 - Displays repository input rows from YAML.
 - Provides a dry-run Nautobot Job named `Analyze Service Repositories`.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` candidates.
+- Includes Backstage `spec.dependsOn` entries as normalized dependency metadata.
 - Handles empty, missing, and malformed YAML without raising a server error from the view.
 - Does not create database models or migrations.
 - Does not persist analysis results.
@@ -70,6 +71,10 @@ Analyze Service Repositories
 The Job reads the configured `service_repositories.yaml`, fetches only selected
 catalog and basic files, and logs a dry-run analysis summary. It does not write
 `desired_services.generated.yaml` and does not create database records.
+
+Generated candidates include a `dependencies` list derived from Backstage
+`spec.dependsOn`. Dependency refs are normalized into `raw_ref`, `kind`,
+`namespace`, `name`, `dependency_type`, and `resolution_status`.
 
 For local checks that do not require Nautobot:
 
