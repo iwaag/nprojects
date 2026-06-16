@@ -20,19 +20,29 @@ Enable the App in `nautobot_config.py`:
 PLUGINS = [
     "nautobot_service_catalog",
 ]
+
+PLUGINS_CONFIG = {
+    "nautobot_service_catalog": {
+        "service_repositories_file": "/path/to/nauto/seed/service_repositories.yaml",
+    },
+}
 ```
 
-By default, the App looks for:
-
-```text
-../nauto/seed/service_repositories.yaml
-```
-
-relative to the `nprojects` repository root. Override this path when needed:
+The `service_repositories_file` setting is the recommended way to point the App
+at the existing catalog. If the setting is omitted, the App checks this
+environment variable:
 
 ```bash
 export NAUTOBOT_SERVICE_REPOSITORIES_FILE=/path/to/nauto/seed/service_repositories.yaml
 ```
+
+If neither is set, the development fallback is:
+
+```text
+./nauto/seed/service_repositories.yaml
+```
+
+relative to Nautobot's current working directory.
 
 After restarting Nautobot, open:
 

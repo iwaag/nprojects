@@ -35,22 +35,23 @@ class RepositoryLoadResult:
     errors: list[str] = field(default_factory=list)
 
 
-def default_repository_file() -> Path:
+def default_repository_file(configured_path: str | Path | None = None) -> Path:
     """Return the default service_repositories.yaml path."""
+
+    if configured_path:
+        return _resolve_configured_path(configured_path)
 
     override = os.environ.get(DEFAULT_SERVICE_REPOSITORIES_ENV)
     if override:
-        return Path(override).expanduser()
+        return _resolve_configured_path(override)
 
-    package_dir = Path(__file__).resolve().parent
-    nprojects_root = package_dir.parent
-    return nprojects_root.parent / "nauto" / "seed" / "service_repositories.yaml"
+    return Path.cwd() / "nauto" / "seed" / "service_repositories.yaml"
 
 
-def load_default_service_repositories() -> RepositoryLoadResult:
+def load_default_service_repositories(configured_path: str | Path | None = None) -> RepositoryLoadResult:
     """Load repository data from the configured default path."""
 
-    return load_service_repositories(default_repository_file())
+    return load_service_repositories(default_repository_file(configured_path))
 
 
 def load_service_repositories(path: Path) -> RepositoryLoadResult:
@@ -156,3 +157,10 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"0", "false", "no", "off"}
     return bool(value)
+
+
+def _resolve_configured_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    return Path.cwd() / path
