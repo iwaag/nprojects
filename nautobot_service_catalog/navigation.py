@@ -13,8 +13,20 @@ else:
                     name="Service Catalog",
                     items=(
                         NavMenuItem(
-                            link="plugins:nautobot_service_catalog:repository_list",
-                            name="Repositories",
+                            link="plugins:nautobot_service_catalog:servicerepository_list",
+                            name="Service Repositories",
+                        ),
+                        NavMenuItem(
+                            link="plugins:nautobot_service_catalog:desiredservicecandidate_list",
+                            name="Desired Service Candidates",
+                        ),
+                        NavMenuItem(
+                            link="plugins:nautobot_service_catalog:servicedependency_list",
+                            name="Service Dependencies",
+                        ),
+                        NavMenuItem(
+                            link="plugins:nautobot_service_catalog:repository_source_yaml_list",
+                            name="Source YAML",
                         ),
                     ),
                 ),

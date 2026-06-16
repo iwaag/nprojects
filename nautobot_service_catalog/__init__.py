@@ -13,13 +13,13 @@ class ServiceCatalogConfig(NautobotAppConfig):
     name = "nautobot_service_catalog"
     verbose_name = "Service Catalog"
     description = "Display and analyze cluster service repositories."
-    version = "0.2.1"
+    version = "0.3.0"
     author = ""
     author_email = ""
     base_url = "service-catalog"
     required_settings = []
     default_settings = {}
-    home_view_name = "plugins:nautobot_service_catalog:repository_list"
+    home_view_name = "plugins:nautobot_service_catalog:servicerepository_list"
 
 
 config = ServiceCatalogConfig

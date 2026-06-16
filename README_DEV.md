@@ -73,3 +73,42 @@ Treat `nauto/seed/*.yaml` as source data.
 Treat `nprojects/nautobot_service_catalog` as the application layer that imports, displays, validates, and eventually analyzes that source data.
 
 Avoid making the App's internal behavior depend on the physical checkout path of the `nauto` repository except during this initial bootstrap phase.
+
+## Current Model Import Boundary
+
+The DB-backed workflow is split into two Jobs:
+
+```text
+Import Service Repositories
+Analyze and Import Service Candidates
+```
+
+The first Job only imports YAML rows into `ServiceRepository`. It does not fetch
+remote repositories.
+
+The second Job analyzes enabled `ServiceRepository` rows and persists
+`DesiredServiceCandidate` and `ServiceDependency`. Dependencies are sourced from
+the Phase 2.1 `dependencies` output and remain unresolved by default.
+
+Repeated imports should not create duplicates:
+
+```text
+ServiceRepository      key: url
+DesiredServiceCandidate key: source_repository + catalog namespace/name/type
+ServiceDependency       key: source_service + kind + namespace + name
+```
+
+## Migration Verification
+
+The initial migration is checked into the App, but this development workspace
+does not include Nautobot or Django. After installing into the real Nautobot
+environment, verify the checked-in migration against the installed Nautobot
+version:
+
+```bash
+nautobot-server makemigrations nautobot_service_catalog --check --dry-run
+nautobot-server migrate nautobot_service_catalog
+```
+
+If `makemigrations --check --dry-run` reports changes, regenerate the migration
+inside that Nautobot environment and review only the App model differences.
