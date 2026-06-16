@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <h1>Service Repositories</h1>
+            <p class="text-muted">
+                Source: <code>{{ source_path }}</code>
+            </p>
+
+            {% if errors %}
+                <div class="alert alert-warning" role="alert">
+                    <strong>Repository catalog issues</strong>
+                    <ul>
+                        {% for error in errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            {% if repositories %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead>
+                            <tr>
+                                <th>URL</th>
+                                <th>Enabled</th>
+                                <th>Ref</th>
+                                <th>Owner</th>
+                                <th>Service Hint</th>
+                                <th>Catalog Paths</th>
+                                <th>Basic File Paths</th>
+                                <th>Raw URL Template</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for repository in repositories %}
+                                <tr>
+                                    <td style="word-break: break-word;"><code>{{ repository.url }}</code></td>
+                                    <td>{{ repository.enabled|yesno:"Yes,No" }}</td>
+                                    <td>{{ repository.ref|default:"-" }}</td>
+                                    <td>{{ repository.owner|default:"-" }}</td>
+                                    <td>{{ repository.service_hint|default:"-" }}</td>
+                                    <td>
+                                        {% if repository.catalog_paths %}
+                                            <ul class="list-unstyled">
+                                                {% for path in repository.catalog_paths %}
+                                                    <li><code>{{ path }}</code></li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if repository.basic_file_paths %}
+                                            <ul class="list-unstyled">
+                                                {% for path in repository.basic_file_paths %}
+                                                    <li><code>{{ path }}</code></li>
+                                                {% endfor %}
+                                            </ul>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ repository.raw_url_template|yesno:"Yes,No" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default">
+                    <div class="panel-body">
+                        No service repositories are registered.
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock content %}
