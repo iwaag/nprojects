@@ -53,6 +53,26 @@ After restarting Nautobot, open:
 ## Current Scope
 
 - Displays repository input rows from YAML.
+- Provides a dry-run Nautobot Job named `Analyze Service Repositories`.
+- Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` candidates.
 - Handles empty, missing, and malformed YAML without raising a server error from the view.
 - Does not create database models or migrations.
-- Does not fetch or analyze remote repository contents.
+- Does not persist analysis results.
+
+## Repository Analysis Preview
+
+After enabling the App, open Nautobot's Jobs UI and run:
+
+```text
+Analyze Service Repositories
+```
+
+The Job reads the configured `service_repositories.yaml`, fetches only selected
+catalog and basic files, and logs a dry-run analysis summary. It does not write
+`desired_services.generated.yaml` and does not create database records.
+
+For local checks that do not require Nautobot:
+
+```bash
+python3 -m unittest discover -s nautobot_service_catalog/tests
+```

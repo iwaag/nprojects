@@ -1,0 +1,393 @@
+"""Analyze service repositories from lightweight catalog metadata."""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
+
+import yaml
+
+from .loaders import RepositoryEntry
+
+DEFAULT_REFS = ("HEAD", "main", "master")
+MAX_FETCH_BYTES = 512_000
+
+
+@dataclass(frozen=True)
+class FetchedFile:
+    """One lightweight repository file fetched for analysis."""
+
+    path: str
+    ref: str
+    text: str
+    source: str
+
+
+@dataclass(frozen=True)
+class RepositoryAnalysisResult:
+    """Analysis output for a set of repository entries."""
+
+    generated_at: str
+    repository_analysis: list[dict[str, Any]] = field(default_factory=list)
+    desired_services: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON/YAML-friendly representation."""
+
+        return asdict(self)
+
+
+def analyze_repositories(
+    repositories: list[RepositoryEntry],
+    fetch_timeout: float,
+    fetcher: Any | None = None,
+) -> RepositoryAnalysisResult:
+    """Analyze repository catalog files and return dry-run service candidates."""
+
+    active_fetcher = fetcher or RepositoryFileFetcher(timeout=fetch_timeout)
+    analyses = []
+    desired_services = []
+    errors = []
+
+    for repository in repositories:
+        try:
+            analysis, services = analyze_repository(active_fetcher, repository)
+        except Exception as exc:  # pragma: no cover - defensive per-repository isolation.
+            analysis = {
+                "repository": _repository_name(repository.url),
+                "url": repository.url,
+                "enabled": repository.enabled,
+                "status": "error",
+                "reasons": ["analysis_error"],
+                "error": str(exc),
+            }
+            services = []
+            errors.append(f"{repository.url}: {exc}")
+        analyses.append(analysis)
+        desired_services.extend(services)
+
+    return RepositoryAnalysisResult(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        repository_analysis=analyses,
+        desired_services=desired_services,
+        errors=errors,
+    )
+
+
+def analyze_repository(
+    fetcher: Any,
+    repository: RepositoryEntry,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Analyze one repository using a fetcher-compatible object."""
+
+    repo_name = _repository_name(repository.url)
+    if not repository.enabled:
+        return (
+            {
+                "repository": repo_name,
+                "url": repository.url,
+                "enabled": False,
+                "status": "skipped",
+                "reasons": ["repository_disabled"],
+                "checked_files": [],
+            },
+            [],
+        )
+
+    default_branch = fetcher.default_branch(repository)
+    refs = _candidate_refs(repository, default_branch)
+    catalog_file = fetcher.fetch_first(repository, repository.catalog_paths, refs)
+    basic_files = fetcher.fetch_many(repository, repository.basic_file_paths, refs)
+    checked_files = sorted({*repository.catalog_paths, *repository.basic_file_paths})
+
+    if catalog_file is None:
+        return (
+            {
+                "repository": repo_name,
+                "url": repository.url,
+                "enabled": True,
+                "status": "insufficient",
+                "reasons": ["catalog_info_missing"],
+                "default_branch": default_branch,
+                "refs_tried": refs,
+                "checked_files": checked_files,
+                "fetched_basic_files": [file.path for file in basic_files],
+                "next_action": "manual_review_or_deeper_scan",
+            },
+            [],
+        )
+
+    entities = _catalog_entities(catalog_file)
+    services = [
+        service
+        for entity in entities
+        if (service := _entity_to_desired_service(entity, repository, catalog_file)) is not None
+    ]
+    status = "catalog_parsed" if services else "insufficient"
+    reasons = ["desired_services_generated"] if services else ["catalog_info_found_but_no_service_component"]
+    return (
+        {
+            "repository": repo_name,
+            "url": repository.url,
+            "enabled": True,
+            "status": status,
+            "reasons": reasons,
+            "default_branch": default_branch,
+            "ref": catalog_file.ref,
+            "catalog_path": catalog_file.path,
+            "checked_files": checked_files,
+            "fetched_basic_files": [file.path for file in basic_files],
+            "catalog_entity_count": len(entities),
+            "generated_service_count": len(services),
+        },
+        services,
+    )
+
+
+class RepositoryFileFetcher:
+    """Fetch selected files from a repository without cloning the repository."""
+
+    def __init__(self, timeout: float):
+        self.timeout = timeout
+
+    def default_branch(self, repository: RepositoryEntry) -> str | None:
+        github = _github_owner_repo(repository.url)
+        if github:
+            owner, repo = github
+            try:
+                text, _ = _request_text(f"https://api.github.com/repos/{owner}/{repo}", self.timeout)
+                data = json.loads(text)
+                branch = data.get("default_branch")
+                return str(branch) if branch else None
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                return None
+
+        gitlab = _gitlab_project_path(repository.url)
+        if gitlab:
+            host, project_path = gitlab
+            project_id = quote(project_path, safe="")
+            try:
+                text, _ = _request_text(f"https://{host}/api/v4/projects/{project_id}", self.timeout)
+                data = json.loads(text)
+                branch = data.get("default_branch")
+                return str(branch) if branch else None
+            except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+                return None
+
+        return None
+
+    def fetch_first(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> FetchedFile | None:
+        for path in paths:
+            for ref in refs:
+                fetched = self.fetch_file(repository, path, ref)
+                if fetched is not None:
+                    return fetched
+        return None
+
+    def fetch_many(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> list[FetchedFile]:
+        fetched_files = []
+        for path in paths:
+            for ref in refs:
+                fetched = self.fetch_file(repository, path, ref)
+                if fetched is not None:
+                    fetched_files.append(fetched)
+                    break
+        return fetched_files
+
+    def fetch_file(self, repository: RepositoryEntry, path: str, ref: str) -> FetchedFile | None:
+        try:
+            if repository.raw_url_template:
+                return self._fetch_raw_template(repository, path, ref)
+
+            github = _github_owner_repo(repository.url)
+            if github:
+                return self._fetch_github(github[0], github[1], path, ref)
+
+            gitlab = _gitlab_project_path(repository.url)
+            if gitlab:
+                return self._fetch_gitlab(gitlab[0], gitlab[1], path, ref)
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, KeyError):
+            return None
+        return None
+
+    def _fetch_raw_template(self, repository: RepositoryEntry, path: str, ref: str) -> FetchedFile:
+        url = repository.raw_url_template.format(ref=quote(ref, safe=""), path=quote(path))
+        text, _ = _request_text(url, self.timeout)
+        return FetchedFile(path=path, ref=ref, text=text, source=url)
+
+    def _fetch_github(self, owner: str, repo: str, path: str, ref: str) -> FetchedFile:
+        api_path = quote(path)
+        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{api_path}?ref={quote(ref, safe='')}"
+        text, _ = _request_text(url, self.timeout, {"Accept": "application/vnd.github+json"})
+        data = json.loads(text)
+        if isinstance(data, list) or data.get("type") != "file":
+            raise ValueError("GitHub contents response did not describe a file")
+        if data.get("encoding") == "base64" and isinstance(data.get("content"), str):
+            raw = base64.b64decode(data["content"], validate=False)
+            if len(raw) > MAX_FETCH_BYTES:
+                raise ValueError(f"file exceeded {MAX_FETCH_BYTES} bytes")
+            file_text = raw.decode("utf-8", errors="replace")
+        elif data.get("download_url"):
+            file_text, _ = _request_text(str(data["download_url"]), self.timeout)
+        else:
+            raise ValueError("GitHub file did not include content")
+        return FetchedFile(path=path, ref=ref, text=file_text, source=url)
+
+    def _fetch_gitlab(self, host: str, project_path: str, path: str, ref: str) -> FetchedFile:
+        project_id = quote(project_path, safe="")
+        file_path = quote(path, safe="")
+        url = f"https://{host}/api/v4/projects/{project_id}/repository/files/{file_path}/raw?ref={quote(ref, safe='')}"
+        text, _ = _request_text(url, self.timeout)
+        return FetchedFile(path=path, ref=ref, text=text, source=url)
+
+
+def _plain_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return [_plain_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _plain_value(item) for key, item in sorted(value.items())}
+    return str(value)
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "service"
+
+
+def _headers() -> dict[str, str]:
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "nautobot-service-catalog-analysis",
+    }
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
+
+
+def _request_text(url: str, timeout: float, headers: dict[str, str] | None = None) -> tuple[str, int]:
+    request_headers = dict(_headers())
+    if headers:
+        request_headers.update(headers)
+    request = Request(url, headers=request_headers, method="GET")
+    with urlopen(request, timeout=timeout) as response:
+        raw = response.read(MAX_FETCH_BYTES + 1)
+    if len(raw) > MAX_FETCH_BYTES:
+        raise ValueError(f"response exceeded {MAX_FETCH_BYTES} bytes")
+    return raw.decode("utf-8", errors="replace"), len(raw)
+
+
+def _github_owner_repo(url: str) -> tuple[str, str] | None:
+    parsed = urlparse(url)
+    if parsed.netloc.lower() != "github.com":
+        return None
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    repo = parts[1].removesuffix(".git")
+    return parts[0], repo
+
+
+def _gitlab_project_path(url: str) -> tuple[str, str] | None:
+    parsed = urlparse(url)
+    if "gitlab" not in parsed.netloc.lower():
+        return None
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    if parts[-1].endswith(".git"):
+        parts[-1] = parts[-1].removesuffix(".git")
+    return parsed.netloc, "/".join(parts)
+
+
+def _candidate_refs(repository: RepositoryEntry, default_branch: str | None) -> list[str]:
+    refs = []
+    if repository.ref:
+        refs.append(repository.ref)
+    if default_branch:
+        refs.append(default_branch)
+    refs.extend(DEFAULT_REFS)
+    deduped = []
+    for ref in refs:
+        if ref and ref not in deduped:
+            deduped.append(ref)
+    return deduped
+
+
+def _catalog_entities(catalog_file: FetchedFile) -> list[dict[str, Any]]:
+    entities = []
+    for doc in yaml.safe_load_all(catalog_file.text):
+        if not isinstance(doc, dict):
+            continue
+        entities.append(_plain_value(doc))
+    return entities
+
+
+def _entity_to_desired_service(
+    entity: dict[str, Any],
+    repository: RepositoryEntry,
+    catalog_file: FetchedFile,
+) -> dict[str, Any] | None:
+    kind = str(entity.get("kind") or "")
+    metadata = entity.get("metadata") if isinstance(entity.get("metadata"), dict) else {}
+    entity_spec = entity.get("spec") if isinstance(entity.get("spec"), dict) else {}
+    component_type = str(entity_spec.get("type") or "").lower()
+    if kind.lower() != "component" or component_type not in {"service", "website", "worker"}:
+        return None
+
+    raw_name = str(metadata.get("name") or repository.service_hint or "")
+    if not raw_name:
+        return None
+    name = _slugify(raw_name)
+    display_name = str(metadata.get("title") or raw_name)
+    owner = repository.owner or entity_spec.get("owner")
+    description = metadata.get("description")
+    notes = description if isinstance(description, str) and description else "Generated from Backstage catalog metadata."
+
+    service = {
+        "name": name,
+        "display_name": display_name,
+        "role": component_type,
+        "required": True,
+        "min_instances": 1,
+        "max_instances": 1,
+        "prefers_gpu": False,
+        "protocol": "http",
+        "source_repository": {
+            "url": repository.url,
+            "ref": catalog_file.ref,
+            "catalog_path": catalog_file.path,
+        },
+        "catalog": {
+            "kind": kind,
+            "metadata_name": metadata.get("name"),
+            "spec_type": entity_spec.get("type"),
+            "lifecycle": entity_spec.get("lifecycle"),
+            "owner": owner,
+            "system": entity_spec.get("system"),
+        },
+        "analysis": {
+            "status": "catalog_derived",
+            "confidence": "medium",
+            "reasons": ["backstage_component_catalog_found"],
+        },
+        "notes": notes,
+    }
+    return _plain_value(service)
+
+
+def _repository_name(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path.strip("/").removesuffix(".git")
+    return path.split("/")[-1] if path else parsed.netloc

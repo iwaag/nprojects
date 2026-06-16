@@ -10,6 +10,15 @@ from typing import Any
 import yaml
 
 DEFAULT_SERVICE_REPOSITORIES_ENV = "NAUTOBOT_SERVICE_REPOSITORIES_FILE"
+DEFAULT_CATALOG_PATHS = ("catalog-info.yaml", "backstage/catalog-info.yaml")
+DEFAULT_BASIC_FILE_PATHS = (
+    "README.md",
+    "readme.md",
+    "package.json",
+    "docker-compose.yml",
+    "compose.yaml",
+    "Chart.yaml",
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +32,8 @@ class RepositoryEntry:
     service_hint: str | None = None
     catalog_paths: list[str] = field(default_factory=list)
     basic_file_paths: list[str] = field(default_factory=list)
+    catalog_paths_defaulted: bool = False
+    basic_file_paths_defaulted: bool = False
     raw_url_template: str | None = None
 
 
@@ -122,6 +133,17 @@ def _normalize_repository_entry(item: Any, index: int) -> tuple[RepositoryEntry 
     if not raw_url:
         return None, [f"Entry {index} is missing required field: url."]
 
+    catalog_paths, catalog_paths_defaulted = _string_list_with_default(
+        item,
+        "catalog_paths",
+        DEFAULT_CATALOG_PATHS,
+    )
+    basic_file_paths, basic_file_paths_defaulted = _string_list_with_default(
+        item,
+        "basic_file_paths",
+        DEFAULT_BASIC_FILE_PATHS,
+    )
+
     return (
         RepositoryEntry(
             url=str(raw_url),
@@ -129,8 +151,10 @@ def _normalize_repository_entry(item: Any, index: int) -> tuple[RepositoryEntry 
             ref=_optional_str(item.get("ref")),
             owner=_optional_str(item.get("owner")),
             service_hint=_optional_str(item.get("service_hint")),
-            catalog_paths=_string_list(item.get("catalog_paths")),
-            basic_file_paths=_string_list(item.get("basic_file_paths")),
+            catalog_paths=catalog_paths,
+            basic_file_paths=basic_file_paths,
+            catalog_paths_defaulted=catalog_paths_defaulted,
+            basic_file_paths_defaulted=basic_file_paths_defaulted,
             raw_url_template=_optional_str(item.get("raw_url_template")),
         ),
         [],
@@ -149,6 +173,12 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def _string_list_with_default(item: dict[Any, Any], key: str, default: tuple[str, ...]) -> tuple[list[str], bool]:
+    if key not in item or item.get(key) is None:
+        return list(default), True
+    return _string_list(item.get(key)), False
 
 
 def _as_bool(value: Any) -> bool:

@@ -44,6 +44,9 @@
                                     <td>{{ repository.owner|default:"-" }}</td>
                                     <td>{{ repository.service_hint|default:"-" }}</td>
                                     <td>
+                                        {% if repository.catalog_paths_defaulted %}
+                                            <span class="text-muted">Default</span>
+                                        {% endif %}
                                         {% if repository.catalog_paths %}
                                             <ul class="list-unstyled">
                                                 {% for path in repository.catalog_paths %}
@@ -55,6 +58,9 @@
                                         {% endif %}
                                     </td>
                                     <td>
+                                        {% if repository.basic_file_paths_defaulted %}
+                                            <span class="text-muted">Default</span>
+                                        {% endif %}
                                         {% if repository.basic_file_paths %}
                                             <ul class="list-unstyled">
                                                 {% for path in repository.basic_file_paths %}
