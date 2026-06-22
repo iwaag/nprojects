@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from nautobot_intent_catalog.analysis import FetchedFile, analyze_repositories
-from nautobot_intent_catalog.loaders import RepositoryEntry
+from nautobot_intent_catalog.analysis import FetchedFile, analyze_intent_sources
+from nautobot_intent_catalog.loaders import IntentSourceEntry
 
 
 class FakeFetcher:
@@ -20,35 +20,35 @@ class FakeFetcher:
         self.fetch_first_calls = 0
         self.fetch_many_calls = 0
 
-    def default_branch(self, repository: RepositoryEntry) -> str | None:
+    def default_branch(self, intent_source: IntentSourceEntry) -> str | None:
         self.default_branch_calls += 1
         return self.default_branch_value
 
-    def fetch_first(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> FetchedFile | None:
+    def fetch_first(self, intent_source: IntentSourceEntry, paths: list[str], refs: list[str]) -> FetchedFile | None:
         self.fetch_first_calls += 1
         return self.catalog_file
 
-    def fetch_many(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> list[FetchedFile]:
+    def fetch_many(self, intent_source: IntentSourceEntry, paths: list[str], refs: list[str]) -> list[FetchedFile]:
         self.fetch_many_calls += 1
         return self.basic_files
 
 
 class AnalysisTests(unittest.TestCase):
-    def test_disabled_repository_is_skipped_without_fetch(self) -> None:
-        repository = RepositoryEntry(url="https://github.com/example/service", enabled=False)
+    def test_disabled_intent_source_is_skipped_without_fetch(self) -> None:
+        intent_source = IntentSourceEntry(url="https://github.com/example/service", enabled=False)
         fetcher = FakeFetcher()
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
-        self.assertEqual(result.repository_analysis[0]["status"], "skipped")
-        self.assertEqual(result.repository_analysis[0]["reasons"], ["repository_disabled"])
+        self.assertEqual(result.source_analyses[0]["status"], "skipped")
+        self.assertEqual(result.source_analyses[0]["reasons"], ["intent_source_disabled"])
         self.assertEqual(result.desired_services, [])
         self.assertEqual(fetcher.default_branch_calls, 0)
         self.assertEqual(fetcher.fetch_first_calls, 0)
         self.assertEqual(fetcher.fetch_many_calls, 0)
 
     def test_missing_catalog_is_insufficient(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/service",
             catalog_paths=["catalog-info.yaml"],
             basic_file_paths=["README.md"],
@@ -58,16 +58,16 @@ class AnalysisTests(unittest.TestCase):
             basic_files=[FetchedFile(path="README.md", ref="main", text="# Service", source="fake")],
         )
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
-        analysis = result.repository_analysis[0]
+        analysis = result.source_analyses[0]
         self.assertEqual(analysis["status"], "insufficient")
         self.assertEqual(analysis["reasons"], ["catalog_info_missing"])
         self.assertEqual(analysis["fetched_basic_files"], ["README.md"])
         self.assertEqual(result.desired_services, [])
 
     def test_service_component_generates_desired_service(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/Example.Service",
             owner="platform",
             catalog_paths=["catalog-info.yaml"],
@@ -91,9 +91,9 @@ class AnalysisTests(unittest.TestCase):
         )
         fetcher = FakeFetcher(catalog_file=catalog)
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
-        analysis = result.repository_analysis[0]
+        analysis = result.source_analyses[0]
         self.assertEqual(analysis["status"], "catalog_parsed")
         self.assertEqual(analysis["generated_service_count"], 1)
         self.assertEqual(result.desired_services[0]["name"], "example-service")
@@ -105,7 +105,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["unresolved_dependencies"], [])
 
     def test_non_service_component_does_not_generate_desired_service(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/library",
             catalog_paths=["catalog-info.yaml"],
             basic_file_paths=[],
@@ -126,17 +126,17 @@ class AnalysisTests(unittest.TestCase):
         )
         fetcher = FakeFetcher(catalog_file=catalog)
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
-        self.assertEqual(result.repository_analysis[0]["status"], "insufficient")
+        self.assertEqual(result.source_analyses[0]["status"], "insufficient")
         self.assertEqual(
-            result.repository_analysis[0]["reasons"],
+            result.source_analyses[0]["reasons"],
             ["catalog_info_found_but_no_service_component"],
         )
         self.assertEqual(result.desired_services, [])
 
     def test_depends_on_entries_are_normalized(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/service",
             catalog_paths=["catalog-info.yaml"],
             basic_file_paths=[],
@@ -161,7 +161,7 @@ class AnalysisTests(unittest.TestCase):
         )
         fetcher = FakeFetcher(catalog_file=catalog)
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
         dependencies = result.desired_services[0]["dependencies"]
         self.assertEqual(
@@ -193,7 +193,7 @@ class AnalysisTests(unittest.TestCase):
                 },
             ],
         )
-        analysis = result.repository_analysis[0]
+        analysis = result.source_analyses[0]
         self.assertEqual(analysis["dependency_count"], 3)
         self.assertEqual(analysis["component_dependency_count"], 1)
         self.assertEqual(analysis["resource_dependency_count"], 2)
@@ -208,7 +208,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("backstage_dependencies_found", result.desired_services[0]["analysis"]["reasons"])
 
     def test_dependency_shorthand_refs_default_to_component_and_default_namespace(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/service",
             catalog_paths=["catalog-info.yaml"],
             basic_file_paths=[],
@@ -232,7 +232,7 @@ class AnalysisTests(unittest.TestCase):
         )
         fetcher = FakeFetcher(catalog_file=catalog)
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
         self.assertEqual(
             result.desired_services[0]["dependencies"],
@@ -265,7 +265,7 @@ class AnalysisTests(unittest.TestCase):
         )
 
     def test_malformed_dependency_refs_are_reported_without_failing_analysis(self) -> None:
-        repository = RepositoryEntry(
+        intent_source = IntentSourceEntry(
             url="https://github.com/example/service",
             catalog_paths=["catalog-info.yaml"],
             basic_file_paths=[],
@@ -289,7 +289,7 @@ class AnalysisTests(unittest.TestCase):
         )
         fetcher = FakeFetcher(catalog_file=catalog)
 
-        result = analyze_repositories([repository], fetch_timeout=1, fetcher=fetcher)
+        result = analyze_intent_sources([intent_source], fetch_timeout=1, fetcher=fetcher)
 
         service = result.desired_services[0]
         self.assertEqual(len(service["dependencies"]), 1)
@@ -302,9 +302,9 @@ class AnalysisTests(unittest.TestCase):
                 {"raw_ref": "component:default/keycloak/extra", "reason": "invalid_entity_ref"},
             ],
         )
-        self.assertEqual(result.repository_analysis[0]["dependency_count"], 1)
+        self.assertEqual(result.source_analyses[0]["dependency_count"], 1)
         self.assertEqual(
-            result.repository_analysis[0]["malformed_dependencies"],
+            result.source_analyses[0]["malformed_dependencies"],
             service["analysis"]["malformed_dependencies"],
         )
 

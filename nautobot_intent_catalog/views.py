@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.shortcuts import render
 
-from .loaders import load_default_service_repositories
+from .loaders import load_default_intent_sources
 
 try:
     from nautobot.apps.views import ObjectDeleteView, ObjectEditView, ObjectListView, ObjectView
@@ -97,22 +97,22 @@ else:
         queryset = DesiredDependency.objects.all()
 
 
-def source_yaml_repository_list(request):
+def source_yaml_intent_source_list(request):
     """Render the configured intent source input list directly from YAML."""
 
-    result = load_default_service_repositories(_configured_source_file())
+    result = load_default_intent_sources(_configured_source_file())
     return render(
         request,
-        "nautobot_intent_catalog/repository_list.html",
+        "nautobot_intent_catalog/source_yaml_list.html",
         {
             "source_path": result.source_path,
-            "repositories": result.repositories,
+            "intent_sources": result.intent_sources,
             "errors": result.errors,
         },
     )
 
 
-repository_list = source_yaml_repository_list
+source_yaml_list = source_yaml_intent_source_list
 
 
 def _configured_source_file():

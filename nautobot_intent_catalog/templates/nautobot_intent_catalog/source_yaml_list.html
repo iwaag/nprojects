@@ -20,7 +20,7 @@
                 </div>
             {% endif %}
 
-            {% if repositories %}
+            {% if intent_sources %}
                 <div class="table-responsive">
                     <table class="table table-hover table-headings">
                         <thead>
@@ -36,20 +36,20 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for repository in repositories %}
+                            {% for intent_source in intent_sources %}
                                 <tr>
-                                    <td style="word-break: break-word;"><code>{{ repository.url }}</code></td>
-                                    <td>{{ repository.enabled|yesno:"Yes,No" }}</td>
-                                    <td>{{ repository.ref|default:"-" }}</td>
-                                    <td>{{ repository.owner|default:"-" }}</td>
-                                    <td>{{ repository.service_hint|default:"-" }}</td>
+                                    <td style="word-break: break-word;"><code>{{ intent_source.url }}</code></td>
+                                    <td>{{ intent_source.enabled|yesno:"Yes,No" }}</td>
+                                    <td>{{ intent_source.ref|default:"-" }}</td>
+                                    <td>{{ intent_source.owner|default:"-" }}</td>
+                                    <td>{{ intent_source.service_hint|default:"-" }}</td>
                                     <td>
-                                        {% if repository.catalog_paths_defaulted %}
+                                        {% if intent_source.catalog_paths_defaulted %}
                                             <span class="text-muted">Default</span>
                                         {% endif %}
-                                        {% if repository.catalog_paths %}
+                                        {% if intent_source.catalog_paths %}
                                             <ul class="list-unstyled">
-                                                {% for path in repository.catalog_paths %}
+                                                {% for path in intent_source.catalog_paths %}
                                                     <li><code>{{ path }}</code></li>
                                                 {% endfor %}
                                             </ul>
@@ -58,12 +58,12 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if repository.basic_file_paths_defaulted %}
+                                        {% if intent_source.basic_file_paths_defaulted %}
                                             <span class="text-muted">Default</span>
                                         {% endif %}
-                                        {% if repository.basic_file_paths %}
+                                        {% if intent_source.basic_file_paths %}
                                             <ul class="list-unstyled">
-                                                {% for path in repository.basic_file_paths %}
+                                                {% for path in intent_source.basic_file_paths %}
                                                     <li><code>{{ path }}</code></li>
                                                 {% endfor %}
                                             </ul>
@@ -71,7 +71,7 @@
                                             -
                                         {% endif %}
                                     </td>
-                                    <td>{{ repository.raw_url_template|yesno:"Yes,No" }}</td>
+                                    <td>{{ intent_source.raw_url_template|yesno:"Yes,No" }}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

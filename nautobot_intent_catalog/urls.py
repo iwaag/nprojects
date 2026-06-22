@@ -5,7 +5,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path("sources/source-yaml/", views.source_yaml_repository_list, name="source_yaml_list"),
+    path("sources/source-yaml/", views.source_yaml_intent_source_list, name="source_yaml_list"),
 ]
 
 if hasattr(views, "IntentSourceListView"):
@@ -43,4 +43,4 @@ if hasattr(views, "IntentSourceListView"):
         ]
     )
 else:
-    urlpatterns.append(path("sources/", views.source_yaml_repository_list, name="source_list"))
+    urlpatterns.append(path("sources/", views.source_yaml_intent_source_list, name="source_list"))

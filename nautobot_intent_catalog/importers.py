@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any
 from urllib.parse import urlparse
 
-from .loaders import RepositoryEntry
+from .loaders import IntentSourceEntry
 
 
 SOURCE_CONFIG_FIELDS = (
@@ -20,7 +20,7 @@ SOURCE_CONFIG_FIELDS = (
 )
 
 
-def intent_source_defaults(source: RepositoryEntry) -> dict[str, Any]:
+def intent_source_defaults(source: IntentSourceEntry) -> dict[str, Any]:
     """Return model defaults for an intent source loader entry."""
 
     data = asdict(source)

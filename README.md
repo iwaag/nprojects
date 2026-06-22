@@ -55,13 +55,37 @@ nautobot-server migrate nautobot_intent_catalog
 
 ## Current Scope
 
-- Imports repository-like intent source rows from YAML into `IntentSource`.
+- Imports `intent_sources` YAML rows into `IntentSource`.
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
 - Provides dry-run and import Nautobot Jobs for intent source analysis.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
 - Does not perform desired-node, desired-endpoint, gap evaluation, or remediation review yet.
+
+## Intent Source YAML
+
+The loader accepts only the current `intent_sources` root. Older input roots are
+not loaded by compatibility code.
+
+```yaml
+intent_sources:
+  - url: https://github.com/example/service
+    enabled: true
+    ref: main
+    owner: platform
+    service_hint: service
+    catalog_paths:
+      - catalog-info.yaml
+    basic_file_paths:
+      - README.md
+    raw_url_template: https://raw.example.test/{ref}/{path}
+```
+
+Manual conversion from an older YAML shape is intentionally mechanical: rename
+the top-level list key to `intent_sources` and keep each item field that still
+applies. Fields such as `catalog_paths`, `basic_file_paths`, and
+`raw_url_template` are stored in `IntentSource.source_config` after import.
 
 For local checks that do not require Nautobot:
 

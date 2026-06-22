@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .analysis import analyze_repositories
+from .analysis import analyze_intent_sources
 from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
     desired_service_identity,
     intent_source_defaults,
 )
-from .loaders import RepositoryEntry
-from .loaders import load_default_service_repositories, load_service_repositories
+from .loaders import IntentSourceEntry
+from .loaders import load_default_intent_sources, load_intent_sources
 
 try:
     from django.conf import settings
@@ -48,31 +48,31 @@ else:
 
         def run(self, source_file: str, fetch_timeout: int, include_service_preview: bool) -> None:
             if source_file:
-                load_result = load_service_repositories(Path(source_file))
+                load_result = load_intent_sources(Path(source_file))
             else:
-                load_result = load_default_service_repositories(_configured_source_file())
+                load_result = load_default_intent_sources(_configured_source_file())
 
             for error in load_result.errors:
                 self.logger.warning(error)
 
-            if load_result.errors and not load_result.repositories:
+            if load_result.errors and not load_result.intent_sources:
                 raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
 
-            result = analyze_repositories(
-                load_result.repositories,
+            result = analyze_intent_sources(
+                load_result.intent_sources,
                 fetch_timeout=float(fetch_timeout),
             )
             summary = {
                 "source_path": str(load_result.source_path),
-                "intent_sources": len(load_result.repositories),
-                "source_analyses": len(result.repository_analysis),
+                "intent_sources": len(load_result.intent_sources),
+                "source_analyses": len(result.source_analyses),
                 "desired_services": len(result.desired_services),
                 "analysis_errors": len(result.errors),
                 "generated_at": result.generated_at,
             }
 
             self.logger.info("Intent source analysis summary: %s", _json(summary))
-            self.logger.info("Intent source analysis detail: %s", _json(result.repository_analysis))
+            self.logger.info("Intent source analysis detail: %s", _json(result.source_analyses))
             for error in result.errors:
                 self.logger.warning(error)
 
@@ -99,18 +99,18 @@ else:
 
         def run(self, source_file: str, disable_missing: bool) -> None:
             if source_file:
-                load_result = load_service_repositories(Path(source_file))
+                load_result = load_intent_sources(Path(source_file))
             else:
-                load_result = load_default_service_repositories(_configured_source_file())
+                load_result = load_default_intent_sources(_configured_source_file())
 
             for error in load_result.errors:
                 self.logger.warning(error)
-            if load_result.errors and not load_result.repositories:
+            if load_result.errors and not load_result.intent_sources:
                 raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
 
             seen_urls = set()
             counts = {"created": 0, "updated": 0, "unchanged": 0, "disabled": 0}
-            for source in load_result.repositories:
+            for source in load_result.intent_sources:
                 seen_urls.add(source.url)
                 defaults = intent_source_defaults(source)
                 obj, created = IntentSource.objects.get_or_create(url=source.url, defaults=defaults)
@@ -133,7 +133,7 @@ else:
                 _json(
                     {
                         "source_path": str(load_result.source_path),
-                        "intent_sources": len(load_result.repositories),
+                        "intent_sources": len(load_result.intent_sources),
                         **counts,
                     }
                 ),
@@ -162,14 +162,14 @@ else:
             if not include_disabled:
                 queryset = queryset.filter(enabled=True)
             intent_sources = list(queryset.order_by("url"))
-            entries = [_repository_entry_from_intent_source(intent_source) for intent_source in intent_sources]
+            entries = [_entry_from_intent_source(intent_source) for intent_source in intent_sources]
             source_by_url = {intent_source.url: intent_source for intent_source in intent_sources}
 
-            result = analyze_repositories(entries, fetch_timeout=float(fetch_timeout))
+            result = analyze_intent_sources(entries, fetch_timeout=float(fetch_timeout))
             now = timezone.now()
             counts = {
                 "intent_sources": len(intent_sources),
-                "source_analyses": len(result.repository_analysis),
+                "source_analyses": len(result.source_analyses),
                 "services_created": 0,
                 "services_updated": 0,
                 "dependencies_created": 0,
@@ -177,7 +177,7 @@ else:
                 "analysis_errors": len(result.errors),
             }
 
-            for analysis in result.repository_analysis:
+            for analysis in result.source_analyses:
                 intent_source = source_by_url.get(analysis.get("url"))
                 if intent_source is None:
                     continue
@@ -238,9 +238,9 @@ def _json(value) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=True)
 
 
-def _repository_entry_from_intent_source(intent_source) -> RepositoryEntry:
+def _entry_from_intent_source(intent_source) -> IntentSourceEntry:
     source_config = intent_source.source_config or {}
-    return RepositoryEntry(
+    return IntentSourceEntry(
         url=intent_source.url,
         enabled=intent_source.enabled,
         ref=intent_source.ref,

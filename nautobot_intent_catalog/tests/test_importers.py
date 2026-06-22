@@ -9,12 +9,12 @@ from nautobot_intent_catalog.importers import (
     desired_service_identity,
     intent_source_defaults,
 )
-from nautobot_intent_catalog.loaders import RepositoryEntry
+from nautobot_intent_catalog.loaders import IntentSourceEntry
 
 
 class ImporterTests(unittest.TestCase):
     def test_intent_source_defaults_normalize_loader_fields(self) -> None:
-        source = RepositoryEntry(
+        source = IntentSourceEntry(
             url="https://github.com/example/service",
             enabled=False,
             ref="main",

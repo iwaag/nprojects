@@ -1,4 +1,4 @@
-"""Analyze service repositories from lightweight catalog metadata."""
+"""Analyze Git-backed intent sources from lightweight catalog metadata."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from .loaders import RepositoryEntry
+from .loaders import IntentSourceEntry
 
 DEFAULT_REFS = ("HEAD", "main", "master")
 MAX_FETCH_BYTES = 512_000
@@ -44,11 +44,11 @@ class CatalogDependency:
 
 
 @dataclass(frozen=True)
-class RepositoryAnalysisResult:
-    """Analysis output for a set of repository entries."""
+class IntentSourceAnalysisResult:
+    """Analysis output for a set of intent source entries."""
 
     generated_at: str
-    repository_analysis: list[dict[str, Any]] = field(default_factory=list)
+    source_analyses: list[dict[str, Any]] = field(default_factory=list)
     desired_services: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -58,74 +58,74 @@ class RepositoryAnalysisResult:
         return asdict(self)
 
 
-def analyze_repositories(
-    repositories: list[RepositoryEntry],
+def analyze_intent_sources(
+    intent_sources: list[IntentSourceEntry],
     fetch_timeout: float,
     fetcher: Any | None = None,
-) -> RepositoryAnalysisResult:
-    """Analyze repository catalog files and return dry-run desired services."""
+) -> IntentSourceAnalysisResult:
+    """Analyze intent source catalog files and return dry-run desired services."""
 
     active_fetcher = fetcher or RepositoryFileFetcher(timeout=fetch_timeout)
     analyses = []
     desired_services = []
     errors = []
 
-    for repository in repositories:
+    for intent_source in intent_sources:
         try:
-            analysis, services = analyze_repository(active_fetcher, repository)
+            analysis, services = analyze_intent_source(active_fetcher, intent_source)
         except Exception as exc:  # pragma: no cover - defensive per-repository isolation.
             analysis = {
-                "repository": _repository_name(repository.url),
-                "url": repository.url,
-                "enabled": repository.enabled,
+                "source": _source_name(intent_source.url),
+                "url": intent_source.url,
+                "enabled": intent_source.enabled,
                 "status": "error",
                 "reasons": ["analysis_error"],
                 "error": str(exc),
             }
             services = []
-            errors.append(f"{repository.url}: {exc}")
+            errors.append(f"{intent_source.url}: {exc}")
         analyses.append(analysis)
         desired_services.extend(services)
 
-    return RepositoryAnalysisResult(
+    return IntentSourceAnalysisResult(
         generated_at=datetime.now(timezone.utc).isoformat(),
-        repository_analysis=analyses,
+        source_analyses=analyses,
         desired_services=desired_services,
         errors=errors,
     )
 
 
-def analyze_repository(
+def analyze_intent_source(
     fetcher: Any,
-    repository: RepositoryEntry,
+    intent_source: IntentSourceEntry,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Analyze one repository using a fetcher-compatible object."""
+    """Analyze one intent source using a fetcher-compatible object."""
 
-    repo_name = _repository_name(repository.url)
-    if not repository.enabled:
+    source_name = _source_name(intent_source.url)
+    if not intent_source.enabled:
         return (
             {
-                "repository": repo_name,
-                "url": repository.url,
+                "source": source_name,
+                "url": intent_source.url,
                 "enabled": False,
                 "status": "skipped",
-                "reasons": ["repository_disabled"],
+                "reasons": ["intent_source_disabled"],
                 "checked_files": [],
             },
             [],
         )
 
-    default_branch = fetcher.default_branch(repository)
-    refs = _service_refs(repository, default_branch)
-    catalog_file = fetcher.fetch_first(repository, repository.catalog_paths, refs)
-    basic_files = fetcher.fetch_many(repository, repository.basic_file_paths, refs)
-    checked_files = sorted({*repository.catalog_paths, *repository.basic_file_paths})
+    default_branch = fetcher.default_branch(intent_source)
+    refs = _intent_source_refs(intent_source, default_branch)
+    catalog_file = fetcher.fetch_first(intent_source, intent_source.catalog_paths, refs)
+    basic_files = fetcher.fetch_many(intent_source, intent_source.basic_file_paths, refs)
+    checked_files = sorted({*intent_source.catalog_paths, *intent_source.basic_file_paths})
 
     if catalog_file is None:
         return (
             {
-                "repository": repo_name,
-                "url": repository.url,
+                "source": source_name,
+                "url": intent_source.url,
                 "enabled": True,
                 "status": "insufficient",
                 "reasons": ["catalog_info_missing"],
@@ -142,15 +142,15 @@ def analyze_repository(
     services = [
         service
         for entity in entities
-        if (service := _entity_to_desired_service(entity, repository, catalog_file)) is not None
+        if (service := _entity_to_desired_service(entity, intent_source, catalog_file)) is not None
     ]
     dependency_summary = _service_dependency_summary(services)
     status = "catalog_parsed" if services else "insufficient"
     reasons = ["desired_services_generated"] if services else ["catalog_info_found_but_no_service_component"]
     return (
         {
-            "repository": repo_name,
-            "url": repository.url,
+            "source": source_name,
+            "url": intent_source.url,
             "enabled": True,
             "status": status,
             "reasons": reasons,
@@ -173,8 +173,8 @@ class RepositoryFileFetcher:
     def __init__(self, timeout: float):
         self.timeout = timeout
 
-    def default_branch(self, repository: RepositoryEntry) -> str | None:
-        github = _github_owner_repo(repository.url)
+    def default_branch(self, intent_source: IntentSourceEntry) -> str | None:
+        github = _github_owner_repo(intent_source.url)
         if github:
             owner, repo = github
             try:
@@ -185,7 +185,7 @@ class RepositoryFileFetcher:
             except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
                 return None
 
-        gitlab = _gitlab_project_path(repository.url)
+        gitlab = _gitlab_project_path(intent_source.url)
         if gitlab:
             host, project_path = gitlab
             project_id = quote(project_path, safe="")
@@ -199,42 +199,42 @@ class RepositoryFileFetcher:
 
         return None
 
-    def fetch_first(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> FetchedFile | None:
+    def fetch_first(self, intent_source: IntentSourceEntry, paths: list[str], refs: list[str]) -> FetchedFile | None:
         for path in paths:
             for ref in refs:
-                fetched = self.fetch_file(repository, path, ref)
+                fetched = self.fetch_file(intent_source, path, ref)
                 if fetched is not None:
                     return fetched
         return None
 
-    def fetch_many(self, repository: RepositoryEntry, paths: list[str], refs: list[str]) -> list[FetchedFile]:
+    def fetch_many(self, intent_source: IntentSourceEntry, paths: list[str], refs: list[str]) -> list[FetchedFile]:
         fetched_files = []
         for path in paths:
             for ref in refs:
-                fetched = self.fetch_file(repository, path, ref)
+                fetched = self.fetch_file(intent_source, path, ref)
                 if fetched is not None:
                     fetched_files.append(fetched)
                     break
         return fetched_files
 
-    def fetch_file(self, repository: RepositoryEntry, path: str, ref: str) -> FetchedFile | None:
+    def fetch_file(self, intent_source: IntentSourceEntry, path: str, ref: str) -> FetchedFile | None:
         try:
-            if repository.raw_url_template:
-                return self._fetch_raw_template(repository, path, ref)
+            if intent_source.raw_url_template:
+                return self._fetch_raw_template(intent_source, path, ref)
 
-            github = _github_owner_repo(repository.url)
+            github = _github_owner_repo(intent_source.url)
             if github:
                 return self._fetch_github(github[0], github[1], path, ref)
 
-            gitlab = _gitlab_project_path(repository.url)
+            gitlab = _gitlab_project_path(intent_source.url)
             if gitlab:
                 return self._fetch_gitlab(gitlab[0], gitlab[1], path, ref)
         except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, KeyError):
             return None
         return None
 
-    def _fetch_raw_template(self, repository: RepositoryEntry, path: str, ref: str) -> FetchedFile:
-        url = repository.raw_url_template.format(ref=quote(ref, safe=""), path=quote(path))
+    def _fetch_raw_template(self, intent_source: IntentSourceEntry, path: str, ref: str) -> FetchedFile:
+        url = intent_source.raw_url_template.format(ref=quote(ref, safe=""), path=quote(path))
         text, _ = _request_text(url, self.timeout)
         return FetchedFile(path=path, ref=ref, text=text, source=url)
 
@@ -325,10 +325,10 @@ def _gitlab_project_path(url: str) -> tuple[str, str] | None:
     return parsed.netloc, "/".join(parts)
 
 
-def _service_refs(repository: RepositoryEntry, default_branch: str | None) -> list[str]:
+def _intent_source_refs(intent_source: IntentSourceEntry, default_branch: str | None) -> list[str]:
     refs = []
-    if repository.ref:
-        refs.append(repository.ref)
+    if intent_source.ref:
+        refs.append(intent_source.ref)
     if default_branch:
         refs.append(default_branch)
     refs.extend(DEFAULT_REFS)
@@ -447,7 +447,7 @@ def _service_dependency_summary(services: list[dict[str, Any]]) -> dict[str, Any
 
 def _entity_to_desired_service(
     entity: dict[str, Any],
-    repository: RepositoryEntry,
+    intent_source: IntentSourceEntry,
     catalog_file: FetchedFile,
 ) -> dict[str, Any] | None:
     kind = str(entity.get("kind") or "")
@@ -457,12 +457,12 @@ def _entity_to_desired_service(
     if kind.lower() != "component" or component_type not in {"service", "website", "worker"}:
         return None
 
-    raw_name = str(metadata.get("name") or repository.service_hint or "")
+    raw_name = str(metadata.get("name") or intent_source.service_hint or "")
     if not raw_name:
         return None
     name = _slugify(raw_name)
     display_name = str(metadata.get("title") or raw_name)
-    owner = repository.owner or entity_spec.get("owner")
+    owner = intent_source.owner or entity_spec.get("owner")
     description = metadata.get("description")
     notes = description if isinstance(description, str) and description else "Generated from Backstage catalog metadata."
     dependencies, malformed_dependencies = _entity_dependencies(entity)
@@ -489,7 +489,7 @@ def _entity_to_desired_service(
         "prefers_gpu": False,
         "protocol": "http",
         "intent_source": {
-            "url": repository.url,
+            "url": intent_source.url,
             "ref": catalog_file.ref,
             "catalog_path": catalog_file.path,
         },
@@ -508,7 +508,7 @@ def _entity_to_desired_service(
     return _plain_value(service)
 
 
-def _repository_name(url: str) -> str:
+def _source_name(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.strip("/").removesuffix(".git")
     return path.split("/")[-1] if path else parsed.netloc
