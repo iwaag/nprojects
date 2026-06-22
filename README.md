@@ -1,9 +1,9 @@
 # Nautobot Intent Catalog
 
 Nautobot App for importing and analyzing cluster intent. The current code
-supports intent sources, desired services, and desired dependencies. Planned
-work will add desired nodes, desired endpoints, evaluations, and deterministic
-exports.
+supports intent sources, desired services, desired dependencies, desired nodes,
+desired endpoints, and deterministic dnsmasq export. Planned work will add
+evaluations and remediation review.
 
 ## Install
 
@@ -59,10 +59,11 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
+- Exports deterministic dnsmasq records from eligible desired endpoints.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
 - Provides dry-run and import Nautobot Jobs for intent source analysis.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
-- Does not perform gap evaluation, dnsmasq export, or remediation review yet.
+- Does not perform gap evaluation or remediation review yet.
 
 ## Intent Source YAML
 
@@ -116,6 +117,29 @@ in the same YAML input. Missing node references are reported as deterministic
 validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
 intent can be captured before a Nautobot `IPAddress` exists; actual state is
 linked separately through `realized_ip_address`.
+
+## dnsmasq Export
+
+Run the `Export dnsmasq Records` Job to log a deterministic dry-run payload.
+The Python API is `nautobot_intent_catalog.dnsmasq.export_dnsmasq_records()`;
+it returns a dictionary-friendly structure with `summary`, `records`, and
+`skipped` entries.
+
+Initial export selection requires:
+
+- `generate_dnsmasq: true`
+- both `ip_address` and `dns_name`
+- desired node lifecycle of `planned`, `approved`, or `active`
+- endpoint type of `primary`, `management`, `service`, or `vpn`
+
+Supported `dnsmasq_record_type` values are:
+
+- `host_record`: `host-record=<dns_name>,<ip>`
+- `address`: `address=/<dns_name>/<ip>`
+- `cname`: `cname=<vpn_dns_name>,<dns_name>`
+
+`cname` records require `vpn_dns_name` as the alias target. `mdns_name` is kept
+as endpoint metadata and is intentionally not exported as a dnsmasq record.
 
 For local checks that do not require Nautobot:
 

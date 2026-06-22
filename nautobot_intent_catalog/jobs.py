@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from .analysis import analyze_intent_sources
+from .dnsmasq import export_dnsmasq_records
 from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
@@ -284,7 +285,32 @@ else:
 
             self.logger.info("Desired service import summary: %s", _json(counts))
 
-    jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources)
+    class ExportDnsmasqRecords(Job):
+        """Dry-run export desired endpoint dnsmasq records."""
+
+        include_skipped = BooleanVar(
+            default=True,
+            description="Include skipped endpoint details in the Job log.",
+        )
+
+        class Meta:
+            name = "Export dnsmasq Records"
+            description = "Dry-run deterministic dnsmasq record export from DesiredEndpoint rows."
+            has_sensitive_variables = False
+
+        def run(self, include_skipped: bool) -> None:
+            endpoints = DesiredEndpoint.objects.select_related("desired_node").order_by(
+                "desired_node__slug",
+                "endpoint_type",
+                "name",
+            )
+            export = export_dnsmasq_records(endpoints, include_skipped=include_skipped)
+            self.logger.info("dnsmasq export summary: %s", _json(export.summary))
+            self.logger.info("dnsmasq export records: %s", _json(export.records))
+            if include_skipped:
+                self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
+
+    jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources, ExportDnsmasqRecords)
 
 
 def _configured_source_file():

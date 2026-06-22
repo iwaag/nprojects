@@ -1,0 +1,167 @@
+"""Deterministic dnsmasq export helpers for desired endpoints."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from ipaddress import ip_interface
+from typing import Any, Iterable
+
+
+ELIGIBLE_NODE_LIFECYCLES = frozenset({"planned", "approved", "active"})
+ELIGIBLE_ENDPOINT_TYPES = frozenset({"primary", "management", "service", "vpn"})
+SUPPORTED_RECORD_TYPES = frozenset({"host_record", "address", "cname"})
+
+
+@dataclass(frozen=True)
+class DnsmasqExport:
+    """Serializable dnsmasq export payload."""
+
+    summary: dict[str, Any]
+    records: list[dict[str, Any]]
+    skipped: list[dict[str, Any]]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "records": self.records,
+            "skipped": self.skipped,
+        }
+
+
+def export_dnsmasq_records(endpoints: Iterable[Any], include_skipped: bool = True) -> DnsmasqExport:
+    """Return deterministic dnsmasq records for eligible desired endpoints."""
+
+    records: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    skipped_count = 0
+    total_count = 0
+
+    for endpoint in endpoints:
+        total_count += 1
+        skip_reasons = _skip_reasons(endpoint)
+        if skip_reasons:
+            skipped_count += 1
+            if include_skipped:
+                skipped.append(_skip_entry(endpoint, skip_reasons))
+            continue
+
+        records.append(_record_entry(endpoint))
+
+    records.sort(key=_record_sort_key)
+    skipped.sort(key=_skip_sort_key)
+    summary = {
+        "eligible_endpoints": len(records),
+        "record_types": {
+            "address": sum(1 for record in records if record["record_type"] == "address"),
+            "cname": sum(1 for record in records if record["record_type"] == "cname"),
+            "host_record": sum(1 for record in records if record["record_type"] == "host_record"),
+        },
+        "skipped_endpoint_details": len(skipped),
+        "skipped_endpoints": skipped_count,
+        "total_endpoints": total_count,
+    }
+    return DnsmasqExport(summary=summary, records=records, skipped=skipped)
+
+
+def _skip_reasons(endpoint: Any) -> list[str]:
+    reasons = []
+    desired_node = getattr(endpoint, "desired_node", None)
+    lifecycle = _text(getattr(desired_node, "lifecycle", None))
+    endpoint_type = _text(getattr(endpoint, "endpoint_type", None))
+    record_type = _text(getattr(endpoint, "dnsmasq_record_type", None))
+
+    if not bool(getattr(endpoint, "generate_dnsmasq", False)):
+        reasons.append("generate_dnsmasq_false")
+    if not _text(getattr(endpoint, "ip_address", None)):
+        reasons.append("missing_ip_address")
+    if not _text(getattr(endpoint, "dns_name", None)):
+        reasons.append("missing_dns_name")
+    if lifecycle not in ELIGIBLE_NODE_LIFECYCLES:
+        reasons.append("node_lifecycle_not_exportable")
+    if endpoint_type not in ELIGIBLE_ENDPOINT_TYPES:
+        reasons.append("endpoint_type_not_exportable")
+    if record_type not in SUPPORTED_RECORD_TYPES:
+        reasons.append("dnsmasq_record_type_not_supported")
+    if record_type == "cname" and not _text(getattr(endpoint, "vpn_dns_name", None)):
+        reasons.append("missing_cname_alias")
+    return reasons
+
+
+def _record_entry(endpoint: Any) -> dict[str, Any]:
+    record_type = _text(getattr(endpoint, "dnsmasq_record_type", None))
+    dns_name = _text(getattr(endpoint, "dns_name", None))
+    ip_address = _host_address(_text(getattr(endpoint, "ip_address", None)))
+    desired_node = getattr(endpoint, "desired_node", None)
+    vpn_dns_name = _text(getattr(endpoint, "vpn_dns_name", None))
+
+    if record_type == "address":
+        line = f"address=/{dns_name}/{ip_address}"
+        record_name = dns_name
+        record_value = ip_address
+    elif record_type == "cname":
+        line = f"cname={vpn_dns_name},{dns_name}"
+        record_name = vpn_dns_name
+        record_value = dns_name
+    else:
+        record_type = "host_record"
+        line = f"host-record={dns_name},{ip_address}"
+        record_name = dns_name
+        record_value = ip_address
+
+    return {
+        "desired_node": _text(getattr(desired_node, "name", None)),
+        "desired_node_slug": _text(getattr(desired_node, "slug", None)),
+        "dns_name": dns_name,
+        "endpoint_name": _text(getattr(endpoint, "name", None)),
+        "endpoint_type": _text(getattr(endpoint, "endpoint_type", None)),
+        "ip_address": _text(getattr(endpoint, "ip_address", None)),
+        "line": line,
+        "mdns_name": _text(getattr(endpoint, "mdns_name", None)),
+        "record_name": record_name,
+        "record_type": record_type,
+        "record_value": record_value,
+        "vpn_dns_name": vpn_dns_name,
+    }
+
+
+def _skip_entry(endpoint: Any, reasons: list[str]) -> dict[str, Any]:
+    desired_node = getattr(endpoint, "desired_node", None)
+    return {
+        "desired_node": _text(getattr(desired_node, "name", None)),
+        "desired_node_slug": _text(getattr(desired_node, "slug", None)),
+        "dns_name": _text(getattr(endpoint, "dns_name", None)),
+        "endpoint_name": _text(getattr(endpoint, "name", None)),
+        "endpoint_type": _text(getattr(endpoint, "endpoint_type", None)),
+        "reasons": sorted(reasons),
+    }
+
+
+def _host_address(value: str) -> str:
+    try:
+        return str(ip_interface(value).ip)
+    except ValueError:
+        return value.split("/", maxsplit=1)[0]
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _record_sort_key(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        record["record_name"],
+        record["desired_node_slug"],
+        record["endpoint_type"],
+        record["endpoint_name"],
+    )
+
+
+def _skip_sort_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        entry["dns_name"],
+        entry["desired_node_slug"],
+        entry["endpoint_type"],
+        entry["endpoint_name"],
+    )
