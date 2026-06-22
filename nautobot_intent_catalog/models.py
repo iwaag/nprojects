@@ -359,3 +359,64 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:desiredendpoint", args=[self.pk])
+
+
+    class IntentEvaluation(PrimaryModel):
+        """Persisted deterministic and optional AI review for one intent target."""
+
+        TARGET_DESIRED_NODE = "desired_node"
+        TARGET_DESIRED_ENDPOINT = "desired_endpoint"
+        TARGET_DESIRED_SERVICE = "desired_service"
+        TARGET_INTENT_SOURCE = "intent_source"
+        TARGET_TYPE_CHOICES = (
+            (TARGET_DESIRED_NODE, "Desired node"),
+            (TARGET_DESIRED_ENDPOINT, "Desired endpoint"),
+            (TARGET_DESIRED_SERVICE, "Desired service"),
+            (TARGET_INTENT_SOURCE, "Intent source"),
+        )
+
+        STATUS_UNKNOWN = "unknown"
+        STATUS_MISSING = "missing"
+        STATUS_PARTIAL = "partial"
+        STATUS_CONFLICT = "conflict"
+        STATUS_SATISFIED = "satisfied"
+        STATUS_NEEDS_REVIEW = "needs_review"
+        STATUS_CHOICES = (
+            (STATUS_UNKNOWN, "Unknown"),
+            (STATUS_MISSING, "Missing"),
+            (STATUS_PARTIAL, "Partial"),
+            (STATUS_CONFLICT, "Conflict"),
+            (STATUS_SATISFIED, "Satisfied"),
+            (STATUS_NEEDS_REVIEW, "Needs review"),
+        )
+
+        target_type = models.CharField(max_length=64, choices=TARGET_TYPE_CHOICES)
+        target_id = models.UUIDField()
+        status = models.CharField(max_length=64, choices=STATUS_CHOICES, default=STATUS_UNKNOWN)
+        deterministic_summary = models.JSONField(default=dict, blank=True)
+        actual_refs = models.JSONField(default=list, blank=True)
+        observed_facts = models.JSONField(default=dict, blank=True)
+        expected_facts = models.JSONField(default=dict, blank=True)
+        gap_summary = models.JSONField(default=dict, blank=True)
+        ai_review = models.JSONField(default=dict, blank=True)
+        recommended_actions = models.JSONField(default=list, blank=True)
+        review_model = models.CharField(max_length=255, blank=True, null=True)
+        source_hash = models.CharField(max_length=128)
+        reviewed_at = models.DateTimeField(blank=True, null=True)
+
+        class Meta:
+            ordering = ("target_type", "target_id", "source_hash")
+            verbose_name = "intent evaluation"
+            verbose_name_plural = "intent evaluations"
+            constraints = (
+                models.UniqueConstraint(
+                    fields=("target_type", "target_id", "source_hash"),
+                    name="nic_unique_evaluation_source",
+                ),
+            )
+
+        def __str__(self) -> str:
+            return f"{self.target_type}:{self.target_id} {self.status}"
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:intentevaluation", args=[self.pk])

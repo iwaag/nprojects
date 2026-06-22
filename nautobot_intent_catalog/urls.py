@@ -62,6 +62,19 @@ if hasattr(views, "IntentSourceListView"):
                 views.DesiredEndpointDeleteView.as_view(),
                 name="desiredendpoint_delete",
             ),
+            path("evaluations/", views.IntentEvaluationListView.as_view(), name="intentevaluation_list"),
+            path("evaluations/add/", views.IntentEvaluationEditView.as_view(), name="intentevaluation_add"),
+            path("evaluations/<uuid:pk>/", views.IntentEvaluationView.as_view(), name="intentevaluation"),
+            path(
+                "evaluations/<uuid:pk>/edit/",
+                views.IntentEvaluationEditView.as_view(),
+                name="intentevaluation_edit",
+            ),
+            path(
+                "evaluations/<uuid:pk>/delete/",
+                views.IntentEvaluationDeleteView.as_view(),
+                name="intentevaluation_delete",
+            ),
         ]
     )
 else:

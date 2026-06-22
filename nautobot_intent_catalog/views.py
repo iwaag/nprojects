@@ -13,11 +13,26 @@ try:
         DesiredEndpointFilterSet,
         DesiredNodeFilterSet,
         DesiredServiceFilterSet,
+        IntentEvaluationFilterSet,
         IntentSourceFilterSet,
     )
-    from .forms import DesiredDependencyForm, DesiredEndpointForm, DesiredNodeForm, DesiredServiceForm, IntentSourceForm
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
-    from .tables import DesiredDependencyTable, DesiredEndpointTable, DesiredNodeTable, DesiredServiceTable, IntentSourceTable
+    from .forms import (
+        DesiredDependencyForm,
+        DesiredEndpointForm,
+        DesiredNodeForm,
+        DesiredServiceForm,
+        IntentEvaluationForm,
+        IntentSourceForm,
+    )
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .tables import (
+        DesiredDependencyTable,
+        DesiredEndpointTable,
+        DesiredNodeTable,
+        DesiredServiceTable,
+        IntentEvaluationTable,
+        IntentSourceTable,
+    )
 except ImportError:  # pragma: no cover - Nautobot is unavailable in local unit tests.
     pass
 else:
@@ -155,6 +170,33 @@ else:
         """Delete a desired endpoint record."""
 
         queryset = DesiredEndpoint.objects.all()
+
+
+    class IntentEvaluationListView(ObjectListView):
+        """List intent evaluation records."""
+
+        queryset = IntentEvaluation.objects.all()
+        filterset = IntentEvaluationFilterSet
+        table = IntentEvaluationTable
+
+
+    class IntentEvaluationView(ObjectView):
+        """Show one intent evaluation record."""
+
+        queryset = IntentEvaluation.objects.all()
+
+
+    class IntentEvaluationEditView(ObjectEditView):
+        """Edit an intent evaluation record."""
+
+        queryset = IntentEvaluation.objects.all()
+        model_form = IntentEvaluationForm
+
+
+    class IntentEvaluationDeleteView(ObjectDeleteView):
+        """Delete an intent evaluation record."""
+
+        queryset = IntentEvaluation.objects.all()
 
 
 def source_yaml_intent_source_list(request):

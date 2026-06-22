@@ -5,7 +5,7 @@ from __future__ import annotations
 try:
     from nautobot.apps.forms import NautobotModelForm
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
@@ -114,4 +114,26 @@ else:
                 "dnsmasq_record_type",
                 "realized_ip_address",
                 "description",
+            )
+
+
+    class IntentEvaluationForm(NautobotModelForm):
+        """Edit form for persisted intent evaluations."""
+
+        class Meta:
+            model = IntentEvaluation
+            fields = (
+                "target_type",
+                "target_id",
+                "status",
+                "deterministic_summary",
+                "actual_refs",
+                "observed_facts",
+                "expected_facts",
+                "gap_summary",
+                "ai_review",
+                "recommended_actions",
+                "review_model",
+                "source_hash",
+                "reviewed_at",
             )

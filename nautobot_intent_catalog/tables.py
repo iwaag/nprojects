@@ -6,7 +6,7 @@ try:
     import django_tables2 as tables
     from nautobot.apps.tables import BaseTable, ButtonsColumn, ToggleColumn
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
@@ -193,5 +193,35 @@ else:
                 "protocol",
                 "port",
                 "generate_dnsmasq",
+                "actions",
+            )
+
+
+    class IntentEvaluationTable(BaseTable):
+        """Intent evaluation list table."""
+
+        pk = ToggleColumn()
+        target_type = tables.LinkColumn()
+        actions = ButtonsColumn(IntentEvaluation)
+
+        class Meta(BaseTable.Meta):
+            model = IntentEvaluation
+            fields = (
+                "pk",
+                "target_type",
+                "target_id",
+                "status",
+                "source_hash",
+                "review_model",
+                "reviewed_at",
+                "actions",
+            )
+            default_columns = (
+                "pk",
+                "target_type",
+                "target_id",
+                "status",
+                "source_hash",
+                "reviewed_at",
                 "actions",
             )

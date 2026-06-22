@@ -3,7 +3,7 @@
 Nautobot App for importing and analyzing cluster intent. The current code
 supports intent sources, desired services, desired dependencies, desired nodes,
 desired endpoints, and deterministic dnsmasq export. Planned work will add
-evaluations and remediation review.
+evaluation jobs and remediation review.
 
 ## Install
 
@@ -59,11 +59,12 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
+- Persists `IntentEvaluation` rows for desired-vs-actual gap data.
 - Exports deterministic dnsmasq records from eligible desired endpoints.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
 - Provides dry-run and import Nautobot Jobs for intent source analysis.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
-- Does not perform gap evaluation or remediation review yet.
+- Does not run automated gap evaluation or remediation review yet.
 
 ## Intent Source YAML
 
@@ -140,6 +141,28 @@ Supported `dnsmasq_record_type` values are:
 
 `cname` records require `vpn_dns_name` as the alias target. `mdns_name` is kept
 as endpoint metadata and is intentionally not exported as a dnsmasq record.
+
+## Intent Evaluations
+
+`IntentEvaluation` stores durable desired-vs-actual review data for UI, API,
+and future agent workflows. It intentionally uses `target_type` and `target_id`
+instead of a generic relation so external automation can address targets with a
+small stable key.
+
+The initial upsert key is:
+
+```text
+target_type, target_id, source_hash
+```
+
+Structured deterministic fields are kept separate from optional AI review:
+
+- deterministic fields: `deterministic_summary`, `actual_refs`,
+  `observed_facts`, `expected_facts`, `gap_summary`, `recommended_actions`
+- AI fields: `ai_review`, `review_model`, `reviewed_at`
+
+`ai_review` may be empty. Deterministic evaluations and recommended actions are
+valid without any model-generated review.
 
 For local checks that do not require Nautobot:
 

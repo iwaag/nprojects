@@ -325,6 +325,58 @@ class Migration(migrations.Migration):
                 "ordering": ("desired_node__name", "endpoint_type", "name"),
             },
         ),
+        migrations.CreateModel(
+            name="IntentEvaluation",
+            fields=[
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("created", models.DateTimeField(auto_now_add=True, null=True)),
+                ("last_updated", models.DateTimeField(auto_now=True, null=True)),
+                ("_custom_field_data", models.JSONField(blank=True, default=dict, editable=False)),
+                (
+                    "target_type",
+                    models.CharField(
+                        choices=[
+                            ("desired_node", "Desired node"),
+                            ("desired_endpoint", "Desired endpoint"),
+                            ("desired_service", "Desired service"),
+                            ("intent_source", "Intent source"),
+                        ],
+                        max_length=64,
+                    ),
+                ),
+                ("target_id", models.UUIDField()),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("unknown", "Unknown"),
+                            ("missing", "Missing"),
+                            ("partial", "Partial"),
+                            ("conflict", "Conflict"),
+                            ("satisfied", "Satisfied"),
+                            ("needs_review", "Needs review"),
+                        ],
+                        default="unknown",
+                        max_length=64,
+                    ),
+                ),
+                ("deterministic_summary", models.JSONField(blank=True, default=dict)),
+                ("actual_refs", models.JSONField(blank=True, default=list)),
+                ("observed_facts", models.JSONField(blank=True, default=dict)),
+                ("expected_facts", models.JSONField(blank=True, default=dict)),
+                ("gap_summary", models.JSONField(blank=True, default=dict)),
+                ("ai_review", models.JSONField(blank=True, default=dict)),
+                ("recommended_actions", models.JSONField(blank=True, default=list)),
+                ("review_model", models.CharField(blank=True, max_length=255, null=True)),
+                ("source_hash", models.CharField(max_length=128)),
+                ("reviewed_at", models.DateTimeField(blank=True, null=True)),
+            ],
+            options={
+                "verbose_name": "intent evaluation",
+                "verbose_name_plural": "intent evaluations",
+                "ordering": ("target_type", "target_id", "source_hash"),
+            },
+        ),
         migrations.AddConstraint(
             model_name="desiredservice",
             constraint=models.UniqueConstraint(
@@ -344,6 +396,13 @@ class Migration(migrations.Migration):
             constraint=models.UniqueConstraint(
                 fields=("desired_node", "name", "endpoint_type"),
                 name="nic_unique_endpoint_per_node_type",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="intentevaluation",
+            constraint=models.UniqueConstraint(
+                fields=("target_type", "target_id", "source_hash"),
+                name="nic_unique_evaluation_source",
             ),
         ),
     ]

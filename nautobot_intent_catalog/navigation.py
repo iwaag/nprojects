@@ -33,6 +33,10 @@ else:
                             name="Desired Endpoints",
                         ),
                         NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:intentevaluation_list",
+                            name="Evaluations",
+                        ),
+                        NavMenuItem(
                             link="plugins:nautobot_intent_catalog:source_yaml_list",
                             name="Source YAML",
                         ),
