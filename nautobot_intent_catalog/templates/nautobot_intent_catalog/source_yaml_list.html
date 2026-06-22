@@ -84,6 +84,82 @@
                     </div>
                 </div>
             {% endif %}
+
+            <h2>Desired Nodes</h2>
+            {% if desired_nodes %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Slug</th>
+                                <th>Type</th>
+                                <th>Lifecycle</th>
+                                <th>Role</th>
+                                <th>Intent Source</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for desired_node in desired_nodes %}
+                                <tr>
+                                    <td>{{ desired_node.name }}</td>
+                                    <td><code>{{ desired_node.slug }}</code></td>
+                                    <td>{{ desired_node.node_type }}</td>
+                                    <td>{{ desired_node.lifecycle }}</td>
+                                    <td>{{ desired_node.role|default:"-" }}</td>
+                                    <td>{{ desired_node.intent_source|default:"-" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default">
+                    <div class="panel-body">
+                        No desired nodes are registered.
+                    </div>
+                </div>
+            {% endif %}
+
+            <h2>Desired Endpoints</h2>
+            {% if desired_endpoints %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Desired Node</th>
+                                <th>Type</th>
+                                <th>IP Address</th>
+                                <th>DNS Name</th>
+                                <th>Protocol</th>
+                                <th>Port</th>
+                                <th>dnsmasq</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for desired_endpoint in desired_endpoints %}
+                                <tr>
+                                    <td>{{ desired_endpoint.name }}</td>
+                                    <td><code>{{ desired_endpoint.desired_node }}</code></td>
+                                    <td>{{ desired_endpoint.endpoint_type }}</td>
+                                    <td>{{ desired_endpoint.ip_address|default:"-" }}</td>
+                                    <td>{{ desired_endpoint.dns_name|default:"-" }}</td>
+                                    <td>{{ desired_endpoint.protocol|default:"-" }}</td>
+                                    <td>{{ desired_endpoint.port|default:"-" }}</td>
+                                    <td>{{ desired_endpoint.generate_dnsmasq|yesno:"Yes,No" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default">
+                    <div class="panel-body">
+                        No desired endpoints are registered.
+                    </div>
+                </div>
+            {% endif %}
         </div>
     </div>
 </div>

@@ -25,6 +25,14 @@ else:
                             name="Dependencies",
                         ),
                         NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:desirednode_list",
+                            name="Desired Nodes",
+                        ),
+                        NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:desiredendpoint_list",
+                            name="Desired Endpoints",
+                        ),
+                        NavMenuItem(
                             link="plugins:nautobot_intent_catalog:source_yaml_list",
                             name="Source YAML",
                         ),

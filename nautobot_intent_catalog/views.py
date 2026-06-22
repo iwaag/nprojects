@@ -8,10 +8,16 @@ from .loaders import load_default_intent_sources
 try:
     from nautobot.apps.views import ObjectDeleteView, ObjectEditView, ObjectListView, ObjectView
 
-    from .filters import DesiredDependencyFilterSet, DesiredServiceFilterSet, IntentSourceFilterSet
-    from .forms import DesiredDependencyForm, DesiredServiceForm, IntentSourceForm
-    from .models import DesiredDependency, DesiredService, IntentSource
-    from .tables import DesiredDependencyTable, DesiredServiceTable, IntentSourceTable
+    from .filters import (
+        DesiredDependencyFilterSet,
+        DesiredEndpointFilterSet,
+        DesiredNodeFilterSet,
+        DesiredServiceFilterSet,
+        IntentSourceFilterSet,
+    )
+    from .forms import DesiredDependencyForm, DesiredEndpointForm, DesiredNodeForm, DesiredServiceForm, IntentSourceForm
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
+    from .tables import DesiredDependencyTable, DesiredEndpointTable, DesiredNodeTable, DesiredServiceTable, IntentSourceTable
 except ImportError:  # pragma: no cover - Nautobot is unavailable in local unit tests.
     pass
 else:
@@ -97,6 +103,60 @@ else:
         queryset = DesiredDependency.objects.all()
 
 
+    class DesiredNodeListView(ObjectListView):
+        """List desired node records."""
+
+        queryset = DesiredNode.objects.select_related("intent_source", "realized_device", "realized_vm")
+        filterset = DesiredNodeFilterSet
+        table = DesiredNodeTable
+
+
+    class DesiredNodeView(ObjectView):
+        """Show one desired node record."""
+
+        queryset = DesiredNode.objects.select_related("intent_source", "realized_device", "realized_vm")
+
+
+    class DesiredNodeEditView(ObjectEditView):
+        """Edit a desired node record."""
+
+        queryset = DesiredNode.objects.all()
+        model_form = DesiredNodeForm
+
+
+    class DesiredNodeDeleteView(ObjectDeleteView):
+        """Delete a desired node record."""
+
+        queryset = DesiredNode.objects.all()
+
+
+    class DesiredEndpointListView(ObjectListView):
+        """List desired endpoint records."""
+
+        queryset = DesiredEndpoint.objects.select_related("desired_node", "realized_ip_address")
+        filterset = DesiredEndpointFilterSet
+        table = DesiredEndpointTable
+
+
+    class DesiredEndpointView(ObjectView):
+        """Show one desired endpoint record."""
+
+        queryset = DesiredEndpoint.objects.select_related("desired_node", "realized_ip_address")
+
+
+    class DesiredEndpointEditView(ObjectEditView):
+        """Edit a desired endpoint record."""
+
+        queryset = DesiredEndpoint.objects.all()
+        model_form = DesiredEndpointForm
+
+
+    class DesiredEndpointDeleteView(ObjectDeleteView):
+        """Delete a desired endpoint record."""
+
+        queryset = DesiredEndpoint.objects.all()
+
+
 def source_yaml_intent_source_list(request):
     """Render the configured intent source input list directly from YAML."""
 
@@ -107,6 +167,8 @@ def source_yaml_intent_source_list(request):
         {
             "source_path": result.source_path,
             "intent_sources": result.intent_sources,
+            "desired_nodes": result.desired_nodes,
+            "desired_endpoints": result.desired_endpoints,
             "errors": result.errors,
         },
     )

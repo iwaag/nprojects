@@ -11,7 +11,11 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies = []
+    dependencies = [
+        ("dcim", "__first__"),
+        ("ipam", "__first__"),
+        ("virtualization", "__first__"),
+    ]
 
     operations = [
         migrations.CreateModel(
@@ -174,6 +178,153 @@ class Migration(migrations.Migration):
                 "ordering": ("source_service__name", "dependency_kind", "namespace", "name"),
             },
         ),
+        migrations.CreateModel(
+            name="DesiredNode",
+            fields=[
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("created", models.DateTimeField(auto_now_add=True, null=True)),
+                ("last_updated", models.DateTimeField(auto_now=True, null=True)),
+                ("_custom_field_data", models.JSONField(blank=True, default=dict, editable=False)),
+                ("name", models.CharField(max_length=255)),
+                ("slug", models.SlugField(max_length=255, unique=True)),
+                (
+                    "node_type",
+                    models.CharField(
+                        choices=[
+                            ("device", "Device"),
+                            ("virtual_machine", "Virtual machine"),
+                            ("container", "Container"),
+                            ("service_host", "Service host"),
+                            ("network", "Network"),
+                            ("other", "Other"),
+                        ],
+                        default="device",
+                        max_length=64,
+                    ),
+                ),
+                (
+                    "lifecycle",
+                    models.CharField(
+                        choices=[
+                            ("planned", "Planned"),
+                            ("approved", "Approved"),
+                            ("active", "Active"),
+                            ("deprecated", "Deprecated"),
+                            ("retired", "Retired"),
+                        ],
+                        default="planned",
+                        max_length=64,
+                    ),
+                ),
+                ("role", models.CharField(blank=True, max_length=255, null=True)),
+                ("description", models.TextField(blank=True, null=True)),
+                ("expected_spec", models.JSONField(blank=True, default=dict)),
+                ("notes", models.TextField(blank=True, null=True)),
+                (
+                    "intent_source",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="desired_nodes",
+                        to="nautobot_intent_catalog.intentsource",
+                    ),
+                ),
+                (
+                    "realized_device",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="intent_catalog_desired_nodes",
+                        to="dcim.device",
+                    ),
+                ),
+                (
+                    "realized_vm",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="intent_catalog_desired_nodes",
+                        to="virtualization.virtualmachine",
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "desired node",
+                "verbose_name_plural": "desired nodes",
+                "ordering": ("name",),
+            },
+        ),
+        migrations.CreateModel(
+            name="DesiredEndpoint",
+            fields=[
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("created", models.DateTimeField(auto_now_add=True, null=True)),
+                ("last_updated", models.DateTimeField(auto_now=True, null=True)),
+                ("_custom_field_data", models.JSONField(blank=True, default=dict, editable=False)),
+                ("name", models.CharField(max_length=255)),
+                (
+                    "endpoint_type",
+                    models.CharField(
+                        choices=[
+                            ("primary", "Primary"),
+                            ("management", "Management"),
+                            ("service", "Service"),
+                            ("vpn", "VPN"),
+                            ("mdns", "mDNS"),
+                            ("other", "Other"),
+                        ],
+                        default="primary",
+                        max_length=64,
+                    ),
+                ),
+                ("ip_address", models.CharField(blank=True, max_length=128, null=True)),
+                ("dns_name", models.CharField(blank=True, max_length=255, null=True)),
+                ("mdns_name", models.CharField(blank=True, max_length=255, null=True)),
+                ("vpn_dns_name", models.CharField(blank=True, max_length=255, null=True)),
+                ("protocol", models.CharField(blank=True, max_length=64, null=True)),
+                ("port", models.PositiveIntegerField(blank=True, null=True)),
+                ("generate_dnsmasq", models.BooleanField(default=False)),
+                (
+                    "dnsmasq_record_type",
+                    models.CharField(
+                        choices=[
+                            ("host_record", "host-record"),
+                            ("address", "address"),
+                            ("cname", "cname"),
+                        ],
+                        default="host_record",
+                        max_length=64,
+                    ),
+                ),
+                ("description", models.TextField(blank=True, null=True)),
+                (
+                    "desired_node",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="desired_endpoints",
+                        to="nautobot_intent_catalog.desirednode",
+                    ),
+                ),
+                (
+                    "realized_ip_address",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="intent_catalog_desired_endpoints",
+                        to="ipam.ipaddress",
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "desired endpoint",
+                "verbose_name_plural": "desired endpoints",
+                "ordering": ("desired_node__name", "endpoint_type", "name"),
+            },
+        ),
         migrations.AddConstraint(
             model_name="desiredservice",
             constraint=models.UniqueConstraint(
@@ -186,6 +337,13 @@ class Migration(migrations.Migration):
             constraint=models.UniqueConstraint(
                 fields=("source_service", "dependency_kind", "namespace", "name"),
                 name="nic_unique_dependency_ref",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="desiredendpoint",
+            constraint=models.UniqueConstraint(
+                fields=("desired_node", "name", "endpoint_type"),
+                name="nic_unique_endpoint_per_node_type",
             ),
         ),
     ]

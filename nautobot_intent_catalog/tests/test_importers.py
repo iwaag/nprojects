@@ -4,12 +4,16 @@ import unittest
 
 from nautobot_intent_catalog.importers import (
     dependency_key,
+    desired_endpoint_defaults,
+    desired_endpoint_identity,
+    desired_node_defaults,
+    desired_node_identity,
     desired_service_defaults,
     desired_service_dependencies,
     desired_service_identity,
     intent_source_defaults,
 )
-from nautobot_intent_catalog.loaders import IntentSourceEntry
+from nautobot_intent_catalog.loaders import DesiredEndpointEntry, DesiredNodeEntry, IntentSourceEntry
 
 
 class ImporterTests(unittest.TestCase):
@@ -106,6 +110,67 @@ class ImporterTests(unittest.TestCase):
 
         self.assertEqual(len(dependencies), 1)
         self.assertEqual(dependency_key(dependencies[0]), ("resource", "default", "postgresql"))
+
+    def test_desired_node_identity_and_defaults(self) -> None:
+        node = DesiredNodeEntry(
+            name="Edge Router 1",
+            slug="edge-router-1",
+            node_type="virtual_machine",
+            lifecycle="approved",
+            role="edge",
+            expected_spec={"cpu": 2},
+            notes="planned replacement",
+        )
+
+        self.assertEqual(desired_node_identity(node), {"slug": "edge-router-1"})
+        self.assertEqual(
+            desired_node_defaults(node, intent_source_id="source-id"),
+            {
+                "name": "Edge Router 1",
+                "node_type": "virtual_machine",
+                "lifecycle": "approved",
+                "role": "edge",
+                "description": None,
+                "expected_spec": {"cpu": 2},
+                "notes": "planned replacement",
+                "intent_source_id": "source-id",
+            },
+        )
+
+    def test_desired_endpoint_identity_and_defaults(self) -> None:
+        endpoint = DesiredEndpointEntry(
+            name="mgmt",
+            desired_node="edge-router-1",
+            endpoint_type="management",
+            ip_address="192.0.2.10/32",
+            dns_name="edge-router-1.example.test",
+            protocol="https",
+            port=443,
+            generate_dnsmasq=True,
+        )
+
+        self.assertEqual(
+            desired_endpoint_identity(endpoint, desired_node_id="node-id"),
+            {
+                "desired_node_id": "node-id",
+                "name": "mgmt",
+                "endpoint_type": "management",
+            },
+        )
+        self.assertEqual(
+            desired_endpoint_defaults(endpoint),
+            {
+                "ip_address": "192.0.2.10/32",
+                "dns_name": "edge-router-1.example.test",
+                "mdns_name": None,
+                "vpn_dns_name": None,
+                "protocol": "https",
+                "port": 443,
+                "generate_dnsmasq": True,
+                "dnsmasq_record_type": "host_record",
+                "description": None,
+            },
+        )
 
 
 if __name__ == "__main__":

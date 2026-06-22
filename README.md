@@ -58,15 +58,17 @@ nautobot-server migrate nautobot_intent_catalog
 - Imports `intent_sources` YAML rows into `IntentSource`.
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
+- Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
 - Provides dry-run and import Nautobot Jobs for intent source analysis.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
-- Does not perform desired-node, desired-endpoint, gap evaluation, or remediation review yet.
+- Does not perform gap evaluation, dnsmasq export, or remediation review yet.
 
 ## Intent Source YAML
 
-The loader accepts only the current `intent_sources` root. Older input roots are
-not loaded by compatibility code.
+The loader accepts only the current `intent_sources`, `desired_nodes`, and
+`desired_endpoints` roots. Older input roots are not loaded by compatibility
+code.
 
 ```yaml
 intent_sources:
@@ -80,12 +82,40 @@ intent_sources:
     basic_file_paths:
       - README.md
     raw_url_template: https://raw.example.test/{ref}/{path}
+
+desired_nodes:
+  - name: Edge Router 1
+    slug: edge-router-1
+    node_type: virtual_machine
+    lifecycle: approved
+    role: edge
+    intent_source: service
+    expected_spec:
+      cpu: 2
+      memory_gb: 4
+
+desired_endpoints:
+  - name: mgmt
+    desired_node: edge-router-1
+    endpoint_type: management
+    ip_address: 192.0.2.10/32
+    dns_name: edge-router-1.example.test
+    protocol: https
+    port: 443
+    generate_dnsmasq: true
+    dnsmasq_record_type: host_record
 ```
 
 Manual conversion from an older YAML shape is intentionally mechanical: rename
 the top-level list key to `intent_sources` and keep each item field that still
 applies. Fields such as `catalog_paths`, `basic_file_paths`, and
 `raw_url_template` are stored in `IntentSource.source_config` after import.
+
+Desired endpoints must reference an existing desired node by node slug or name
+in the same YAML input. Missing node references are reported as deterministic
+validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
+intent can be captured before a Nautobot `IPAddress` exists; actual state is
+linked separately through `realized_ip_address`.
 
 For local checks that do not require Nautobot:
 

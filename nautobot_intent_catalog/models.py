@@ -201,3 +201,161 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:desireddependency", args=[self.pk])
+
+
+    class DesiredNode(PrimaryModel):
+        """Desired compute or network node managed as intent."""
+
+        NODE_TYPE_DEVICE = "device"
+        NODE_TYPE_VIRTUAL_MACHINE = "virtual_machine"
+        NODE_TYPE_CONTAINER = "container"
+        NODE_TYPE_SERVICE_HOST = "service_host"
+        NODE_TYPE_NETWORK = "network"
+        NODE_TYPE_OTHER = "other"
+        NODE_TYPE_CHOICES = (
+            (NODE_TYPE_DEVICE, "Device"),
+            (NODE_TYPE_VIRTUAL_MACHINE, "Virtual machine"),
+            (NODE_TYPE_CONTAINER, "Container"),
+            (NODE_TYPE_SERVICE_HOST, "Service host"),
+            (NODE_TYPE_NETWORK, "Network"),
+            (NODE_TYPE_OTHER, "Other"),
+        )
+
+        LIFECYCLE_PLANNED = "planned"
+        LIFECYCLE_APPROVED = "approved"
+        LIFECYCLE_ACTIVE = "active"
+        LIFECYCLE_DEPRECATED = "deprecated"
+        LIFECYCLE_RETIRED = "retired"
+        LIFECYCLE_CHOICES = (
+            (LIFECYCLE_PLANNED, "Planned"),
+            (LIFECYCLE_APPROVED, "Approved"),
+            (LIFECYCLE_ACTIVE, "Active"),
+            (LIFECYCLE_DEPRECATED, "Deprecated"),
+            (LIFECYCLE_RETIRED, "Retired"),
+        )
+
+        name = models.CharField(max_length=255)
+        slug = models.SlugField(max_length=255, unique=True)
+        node_type = models.CharField(
+            max_length=64,
+            choices=NODE_TYPE_CHOICES,
+            default=NODE_TYPE_DEVICE,
+        )
+        lifecycle = models.CharField(
+            max_length=64,
+            choices=LIFECYCLE_CHOICES,
+            default=LIFECYCLE_PLANNED,
+        )
+        role = models.CharField(max_length=255, blank=True, null=True)
+        description = models.TextField(blank=True, null=True)
+        expected_spec = models.JSONField(default=dict, blank=True)
+        intent_source = models.ForeignKey(
+            IntentSource,
+            on_delete=models.SET_NULL,
+            blank=True,
+            null=True,
+            related_name="desired_nodes",
+        )
+        realized_device = models.ForeignKey(
+            "dcim.Device",
+            on_delete=models.SET_NULL,
+            blank=True,
+            null=True,
+            related_name="intent_catalog_desired_nodes",
+        )
+        realized_vm = models.ForeignKey(
+            "virtualization.VirtualMachine",
+            on_delete=models.SET_NULL,
+            blank=True,
+            null=True,
+            related_name="intent_catalog_desired_nodes",
+        )
+        notes = models.TextField(blank=True, null=True)
+
+        class Meta:
+            ordering = ("name",)
+            verbose_name = "desired node"
+            verbose_name_plural = "desired nodes"
+
+        def __str__(self) -> str:
+            return self.name
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:desirednode", args=[self.pk])
+
+
+    class DesiredEndpoint(PrimaryModel):
+        """Desired endpoint attached to a desired node."""
+
+        ENDPOINT_TYPE_PRIMARY = "primary"
+        ENDPOINT_TYPE_MANAGEMENT = "management"
+        ENDPOINT_TYPE_SERVICE = "service"
+        ENDPOINT_TYPE_VPN = "vpn"
+        ENDPOINT_TYPE_MDNS = "mdns"
+        ENDPOINT_TYPE_OTHER = "other"
+        ENDPOINT_TYPE_CHOICES = (
+            (ENDPOINT_TYPE_PRIMARY, "Primary"),
+            (ENDPOINT_TYPE_MANAGEMENT, "Management"),
+            (ENDPOINT_TYPE_SERVICE, "Service"),
+            (ENDPOINT_TYPE_VPN, "VPN"),
+            (ENDPOINT_TYPE_MDNS, "mDNS"),
+            (ENDPOINT_TYPE_OTHER, "Other"),
+        )
+
+        DNSMASQ_HOST_RECORD = "host_record"
+        DNSMASQ_ADDRESS = "address"
+        DNSMASQ_CNAME = "cname"
+        DNSMASQ_RECORD_TYPE_CHOICES = (
+            (DNSMASQ_HOST_RECORD, "host-record"),
+            (DNSMASQ_ADDRESS, "address"),
+            (DNSMASQ_CNAME, "cname"),
+        )
+
+        name = models.CharField(max_length=255)
+        desired_node = models.ForeignKey(
+            DesiredNode,
+            on_delete=models.CASCADE,
+            related_name="desired_endpoints",
+        )
+        endpoint_type = models.CharField(
+            max_length=64,
+            choices=ENDPOINT_TYPE_CHOICES,
+            default=ENDPOINT_TYPE_PRIMARY,
+        )
+        ip_address = models.CharField(max_length=128, blank=True, null=True)
+        dns_name = models.CharField(max_length=255, blank=True, null=True)
+        mdns_name = models.CharField(max_length=255, blank=True, null=True)
+        vpn_dns_name = models.CharField(max_length=255, blank=True, null=True)
+        protocol = models.CharField(max_length=64, blank=True, null=True)
+        port = models.PositiveIntegerField(blank=True, null=True)
+        generate_dnsmasq = models.BooleanField(default=False)
+        dnsmasq_record_type = models.CharField(
+            max_length=64,
+            choices=DNSMASQ_RECORD_TYPE_CHOICES,
+            default=DNSMASQ_HOST_RECORD,
+        )
+        realized_ip_address = models.ForeignKey(
+            "ipam.IPAddress",
+            on_delete=models.SET_NULL,
+            blank=True,
+            null=True,
+            related_name="intent_catalog_desired_endpoints",
+        )
+        description = models.TextField(blank=True, null=True)
+
+        class Meta:
+            ordering = ("desired_node__name", "endpoint_type", "name")
+            verbose_name = "desired endpoint"
+            verbose_name_plural = "desired endpoints"
+            constraints = (
+                models.UniqueConstraint(
+                    fields=("desired_node", "name", "endpoint_type"),
+                    name="nic_unique_endpoint_per_node_type",
+                ),
+            )
+
+        def __str__(self) -> str:
+            return f"{self.desired_node}: {self.name}"
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:desiredendpoint", args=[self.pk])

@@ -3,9 +3,9 @@
 ## Current Boundary
 
 `nautobot_intent_catalog` is the application layer for cluster intent. The code
-currently analyzes Git-backed intent sources and persists desired service and
-dependency records. Package, AppConfig, URL base, settings key, Job names, and
-YAML loader names use Intent Catalog terminology.
+currently analyzes Git-backed intent sources and persists desired service,
+dependency, node, and endpoint records. Package, AppConfig, URL base, settings
+key, Job names, and YAML loader names use Intent Catalog terminology.
 
 The App should not depend on the physical checkout path of another repository.
 When a YAML input file is needed during local development, provide it explicitly:

@@ -10,6 +10,10 @@ from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
     desired_service_identity,
+    desired_endpoint_defaults,
+    desired_endpoint_identity,
+    desired_node_defaults,
+    desired_node_identity,
     intent_source_defaults,
 )
 from .loaders import IntentSourceEntry
@@ -20,7 +24,7 @@ try:
     from django.utils import timezone
     from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar
 
-    from .models import DesiredDependency, DesiredService, IntentSource
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
     jobs = ()
 else:
@@ -105,11 +109,22 @@ else:
 
             for error in load_result.errors:
                 self.logger.warning(error)
-            if load_result.errors and not load_result.intent_sources:
+            if load_result.errors:
                 raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
 
             seen_urls = set()
-            counts = {"created": 0, "updated": 0, "unchanged": 0, "disabled": 0}
+            counts = {
+                "created": 0,
+                "updated": 0,
+                "unchanged": 0,
+                "disabled": 0,
+                "nodes_created": 0,
+                "nodes_updated": 0,
+                "nodes_unchanged": 0,
+                "endpoints_created": 0,
+                "endpoints_updated": 0,
+                "endpoints_unchanged": 0,
+            }
             for source in load_result.intent_sources:
                 seen_urls.add(source.url)
                 defaults = intent_source_defaults(source)
@@ -128,12 +143,56 @@ else:
                 missing = IntentSource.objects.exclude(url__in=seen_urls).filter(enabled=True)
                 counts["disabled"] = missing.update(enabled=False)
 
+            source_by_key = _intent_source_lookup()
+            node_by_key = {}
+            for node in load_result.desired_nodes:
+                intent_source = source_by_key.get(node.intent_source) if node.intent_source else None
+                defaults = desired_node_defaults(node, intent_source_id=getattr(intent_source, "pk", None))
+                identity = desired_node_identity(node)
+                node_obj, created = DesiredNode.objects.get_or_create(**identity, defaults=defaults)
+                if created:
+                    counts["nodes_created"] += 1
+                elif _object_matches_defaults(obj=node_obj, defaults=defaults):
+                    counts["nodes_unchanged"] += 1
+                else:
+                    for key, value in defaults.items():
+                        setattr(node_obj, key, value)
+                    node_obj.save(update_fields=tuple(defaults.keys()))
+                    counts["nodes_updated"] += 1
+                node_by_key[node.slug] = node_obj
+                node_by_key[node.name] = node_obj
+
+            if load_result.desired_endpoints:
+                existing_nodes = DesiredNode.objects.all()
+                for node_obj in existing_nodes:
+                    node_by_key.setdefault(node_obj.slug, node_obj)
+                    node_by_key.setdefault(node_obj.name, node_obj)
+
+            for endpoint in load_result.desired_endpoints:
+                desired_node = node_by_key.get(endpoint.desired_node)
+                if desired_node is None:
+                    raise ValueError(f"Desired endpoint references missing desired node: {endpoint.desired_node}")
+                identity = desired_endpoint_identity(endpoint, desired_node_id=desired_node.pk)
+                defaults = desired_endpoint_defaults(endpoint)
+                endpoint_obj, created = DesiredEndpoint.objects.get_or_create(**identity, defaults=defaults)
+                if created:
+                    counts["endpoints_created"] += 1
+                elif _object_matches_defaults(obj=endpoint_obj, defaults=defaults):
+                    counts["endpoints_unchanged"] += 1
+                else:
+                    for key, value in defaults.items():
+                        setattr(endpoint_obj, key, value)
+                    endpoint_obj.save(update_fields=tuple(defaults.keys()))
+                    counts["endpoints_updated"] += 1
+
             self.logger.info(
                 "Intent source import summary: %s",
                 _json(
                     {
                         "source_path": str(load_result.source_path),
                         "intent_sources": len(load_result.intent_sources),
+                        "desired_nodes": len(load_result.desired_nodes),
+                        "desired_endpoints": len(load_result.desired_endpoints),
                         **counts,
                     }
                 ),
@@ -250,6 +309,16 @@ def _entry_from_intent_source(intent_source) -> IntentSourceEntry:
         basic_file_paths=list(source_config.get("basic_file_paths") or []),
         raw_url_template=source_config.get("raw_url_template"),
     )
+
+
+def _intent_source_lookup() -> dict:
+    lookup = {}
+    for intent_source in IntentSource.objects.all():
+        lookup[intent_source.slug] = intent_source
+        lookup[intent_source.name] = intent_source
+        if intent_source.url:
+            lookup[intent_source.url] = intent_source
+    return lookup
 
 
 def _object_matches_defaults(obj, defaults: dict) -> bool:

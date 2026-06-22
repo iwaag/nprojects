@@ -40,6 +40,28 @@ if hasattr(views, "IntentSourceListView"):
                 views.DesiredDependencyDeleteView.as_view(),
                 name="desireddependency_delete",
             ),
+            path("nodes/", views.DesiredNodeListView.as_view(), name="desirednode_list"),
+            path("nodes/add/", views.DesiredNodeEditView.as_view(), name="desirednode_add"),
+            path("nodes/<uuid:pk>/", views.DesiredNodeView.as_view(), name="desirednode"),
+            path("nodes/<uuid:pk>/edit/", views.DesiredNodeEditView.as_view(), name="desirednode_edit"),
+            path(
+                "nodes/<uuid:pk>/delete/",
+                views.DesiredNodeDeleteView.as_view(),
+                name="desirednode_delete",
+            ),
+            path("endpoints/", views.DesiredEndpointListView.as_view(), name="desiredendpoint_list"),
+            path("endpoints/add/", views.DesiredEndpointEditView.as_view(), name="desiredendpoint_add"),
+            path("endpoints/<uuid:pk>/", views.DesiredEndpointView.as_view(), name="desiredendpoint"),
+            path(
+                "endpoints/<uuid:pk>/edit/",
+                views.DesiredEndpointEditView.as_view(),
+                name="desiredendpoint_edit",
+            ),
+            path(
+                "endpoints/<uuid:pk>/delete/",
+                views.DesiredEndpointDeleteView.as_view(),
+                name="desiredendpoint_delete",
+            ),
         ]
     )
 else:

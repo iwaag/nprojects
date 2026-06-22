@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any
 from urllib.parse import urlparse
 
-from .loaders import IntentSourceEntry
+from .loaders import DesiredEndpointEntry, DesiredNodeEntry, IntentSourceEntry
 
 
 SOURCE_CONFIG_FIELDS = (
@@ -120,6 +120,54 @@ def desired_service_dependencies(service: dict[str, Any]) -> list[dict[str, Any]
         and dependency.get("namespace")
         and dependency.get("name")
     ]
+
+
+def desired_node_identity(node: DesiredNodeEntry) -> dict[str, Any]:
+    """Return the stable identity fields for a desired node."""
+
+    return {"slug": node.slug}
+
+
+def desired_node_defaults(node: DesiredNodeEntry, intent_source_id: Any | None = None) -> dict[str, Any]:
+    """Return model defaults for a desired node loader entry."""
+
+    defaults = {
+        "name": node.name,
+        "node_type": node.node_type,
+        "lifecycle": node.lifecycle,
+        "role": node.role,
+        "description": node.description,
+        "expected_spec": node.expected_spec,
+        "notes": node.notes,
+        "intent_source_id": intent_source_id,
+    }
+    return defaults
+
+
+def desired_endpoint_identity(endpoint: DesiredEndpointEntry, desired_node_id: Any) -> dict[str, Any]:
+    """Return the stable identity fields for a desired endpoint."""
+
+    return {
+        "desired_node_id": desired_node_id,
+        "name": endpoint.name,
+        "endpoint_type": endpoint.endpoint_type,
+    }
+
+
+def desired_endpoint_defaults(endpoint: DesiredEndpointEntry) -> dict[str, Any]:
+    """Return model defaults for a desired endpoint loader entry."""
+
+    return {
+        "ip_address": endpoint.ip_address,
+        "dns_name": endpoint.dns_name,
+        "mdns_name": endpoint.mdns_name,
+        "vpn_dns_name": endpoint.vpn_dns_name,
+        "protocol": endpoint.protocol,
+        "port": endpoint.port,
+        "generate_dnsmasq": endpoint.generate_dnsmasq,
+        "dnsmasq_record_type": endpoint.dnsmasq_record_type,
+        "description": endpoint.description,
+    }
 
 
 def _analysis_warnings(analysis: dict[str, Any]) -> list[Any]:
