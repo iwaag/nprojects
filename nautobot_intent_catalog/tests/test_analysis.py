@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from nautobot_service_catalog.analysis import FetchedFile, analyze_repositories
-from nautobot_service_catalog.loaders import RepositoryEntry
+from nautobot_intent_catalog.analysis import FetchedFile, analyze_repositories
+from nautobot_intent_catalog.loaders import RepositoryEntry
 
 
 class FakeFetcher:
@@ -66,7 +66,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["fetched_basic_files"], ["README.md"])
         self.assertEqual(result.desired_services, [])
 
-    def test_service_component_generates_candidate(self) -> None:
+    def test_service_component_generates_desired_service(self) -> None:
         repository = RepositoryEntry(
             url="https://github.com/example/Example.Service",
             owner="platform",
@@ -104,7 +104,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(analysis["dependency_count"], 0)
         self.assertEqual(analysis["unresolved_dependencies"], [])
 
-    def test_non_service_component_does_not_generate_candidate(self) -> None:
+    def test_non_service_component_does_not_generate_desired_service(self) -> None:
         repository = RepositoryEntry(
             url="https://github.com/example/library",
             catalog_paths=["catalog-info.yaml"],

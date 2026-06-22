@@ -1,4 +1,4 @@
-"""Filter sets for Service Catalog models."""
+"""Filter sets for Intent Catalog models."""
 
 from __future__ import annotations
 
@@ -6,40 +6,45 @@ try:
     import django_filters
     from nautobot.apps.filters import NautobotFilterSet
 
-    from .models import DesiredServiceCandidate, ServiceDependency, ServiceRepository
+    from .models import DesiredDependency, DesiredService, IntentSource
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
 
-    class ServiceRepositoryFilterSet(NautobotFilterSet):
-        """Filters for repository inputs."""
+    class IntentSourceFilterSet(NautobotFilterSet):
+        """Filters for intent sources."""
 
         q = django_filters.CharFilter(method="search", label="Search")
 
         class Meta:
-            model = ServiceRepository
-            fields = ("id", "url", "enabled", "owner", "service_hint", "last_analysis_status")
+            model = IntentSource
+            fields = ("id", "name", "slug", "source_type", "url", "enabled", "owner", "last_import_status")
 
         def search(self, queryset, name, value):
             if not value.strip():
                 return queryset
-            return queryset.filter(url__icontains=value) | queryset.filter(service_hint__icontains=value)
+            return (
+                queryset.filter(name__icontains=value)
+                | queryset.filter(slug__icontains=value)
+                | queryset.filter(url__icontains=value)
+            )
 
 
-    class DesiredServiceCandidateFilterSet(NautobotFilterSet):
-        """Filters for desired service candidates."""
+    class DesiredServiceFilterSet(NautobotFilterSet):
+        """Filters for desired services."""
 
         q = django_filters.CharFilter(method="search", label="Search")
 
         class Meta:
-            model = DesiredServiceCandidate
+            model = DesiredService
             fields = (
                 "id",
                 "name",
-                "role",
-                "source_repository",
+                "slug",
+                "service_type",
+                "lifecycle",
+                "intent_source",
                 "catalog_owner",
-                "analysis_status",
             )
 
         def search(self, queryset, name, value):
@@ -48,17 +53,17 @@ else:
             return queryset.filter(name__icontains=value) | queryset.filter(display_name__icontains=value)
 
 
-    class ServiceDependencyFilterSet(NautobotFilterSet):
-        """Filters for service dependencies."""
+    class DesiredDependencyFilterSet(NautobotFilterSet):
+        """Filters for desired dependencies."""
 
         q = django_filters.CharFilter(method="search", label="Search")
 
         class Meta:
-            model = ServiceDependency
+            model = DesiredDependency
             fields = (
                 "id",
                 "source_service",
-                "kind",
+                "dependency_kind",
                 "namespace",
                 "name",
                 "dependency_type",

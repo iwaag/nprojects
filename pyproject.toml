@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nautobot-service-catalog"
+name = "nautobot-intent-catalog"
 version = "0.3.1"
-description = "Nautobot app for displaying and analyzing cluster service repositories."
+description = "Nautobot app for managing and analyzing cluster desired state and intent."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "CC0-1.0" }
@@ -14,10 +14,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://example.invalid/nautobot-service-catalog"
+Homepage = "https://example.invalid/nautobot-intent-catalog"
 
 [tool.setuptools.packages.find]
-include = ["nautobot_service_catalog*"]
+include = ["nautobot_intent_catalog*"]
 
 [tool.setuptools.package-data]
-nautobot_service_catalog = ["templates/**/*.html"]
+nautobot_intent_catalog = ["templates/**/*.html"]

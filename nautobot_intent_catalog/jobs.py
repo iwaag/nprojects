@@ -1,0 +1,256 @@
+"""Nautobot Jobs for intent source analysis."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .analysis import analyze_repositories
+from .importers import (
+    desired_service_defaults,
+    desired_service_dependencies,
+    desired_service_identity,
+    intent_source_defaults,
+)
+from .loaders import RepositoryEntry
+from .loaders import load_default_service_repositories, load_service_repositories
+
+try:
+    from django.conf import settings
+    from django.utils import timezone
+    from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar
+
+    from .models import DesiredDependency, DesiredService, IntentSource
+except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
+    jobs = ()
+else:
+
+    class PreviewIntentSourceAnalysis(Job):
+        """Dry-run analyze configured intent sources."""
+
+        source_file = StringVar(
+            default="",
+            description="Optional path to intent_sources.yaml. Empty uses App configuration.",
+        )
+        fetch_timeout = IntegerVar(
+            default=10,
+            description="HTTP timeout in seconds for each lightweight file request.",
+        )
+        include_service_preview = BooleanVar(
+            default=True,
+            description="Log generated desired services as JSON.",
+        )
+
+        class Meta:
+            name = "Preview Intent Source Analysis"
+            description = "Dry-run Backstage catalog detection for configured intent sources."
+            has_sensitive_variables = False
+
+        def run(self, source_file: str, fetch_timeout: int, include_service_preview: bool) -> None:
+            if source_file:
+                load_result = load_service_repositories(Path(source_file))
+            else:
+                load_result = load_default_service_repositories(_configured_source_file())
+
+            for error in load_result.errors:
+                self.logger.warning(error)
+
+            if load_result.errors and not load_result.repositories:
+                raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
+
+            result = analyze_repositories(
+                load_result.repositories,
+                fetch_timeout=float(fetch_timeout),
+            )
+            summary = {
+                "source_path": str(load_result.source_path),
+                "intent_sources": len(load_result.repositories),
+                "source_analyses": len(result.repository_analysis),
+                "desired_services": len(result.desired_services),
+                "analysis_errors": len(result.errors),
+                "generated_at": result.generated_at,
+            }
+
+            self.logger.info("Intent source analysis summary: %s", _json(summary))
+            self.logger.info("Intent source analysis detail: %s", _json(result.repository_analysis))
+            for error in result.errors:
+                self.logger.warning(error)
+
+            if include_service_preview:
+                self.logger.info("Desired service preview: %s", _json(result.desired_services))
+
+
+    class ImportIntentSources(Job):
+        """Import intent source inputs from configured YAML into DB models."""
+
+        source_file = StringVar(
+            default="",
+            description="Optional path to intent_sources.yaml. Empty uses App configuration.",
+        )
+        disable_missing = BooleanVar(
+            default=False,
+            description="Disable existing DB intent sources that are not present in the YAML input.",
+        )
+
+        class Meta:
+            name = "Import Intent Sources"
+            description = "Import intent source YAML rows into IntentSource records."
+            has_sensitive_variables = False
+
+        def run(self, source_file: str, disable_missing: bool) -> None:
+            if source_file:
+                load_result = load_service_repositories(Path(source_file))
+            else:
+                load_result = load_default_service_repositories(_configured_source_file())
+
+            for error in load_result.errors:
+                self.logger.warning(error)
+            if load_result.errors and not load_result.repositories:
+                raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
+
+            seen_urls = set()
+            counts = {"created": 0, "updated": 0, "unchanged": 0, "disabled": 0}
+            for source in load_result.repositories:
+                seen_urls.add(source.url)
+                defaults = intent_source_defaults(source)
+                obj, created = IntentSource.objects.get_or_create(url=source.url, defaults=defaults)
+                if created:
+                    counts["created"] += 1
+                elif _object_matches_defaults(obj, defaults):
+                    counts["unchanged"] += 1
+                else:
+                    for key, value in defaults.items():
+                        setattr(obj, key, value)
+                    obj.save(update_fields=tuple(defaults.keys()))
+                    counts["updated"] += 1
+
+            if disable_missing:
+                missing = IntentSource.objects.exclude(url__in=seen_urls).filter(enabled=True)
+                counts["disabled"] = missing.update(enabled=False)
+
+            self.logger.info(
+                "Intent source import summary: %s",
+                _json(
+                    {
+                        "source_path": str(load_result.source_path),
+                        "intent_sources": len(load_result.repositories),
+                        **counts,
+                    }
+                ),
+            )
+
+
+    class AnalyzeIntentSources(Job):
+        """Analyze DB-backed intent sources and persist desired services plus dependencies."""
+
+        fetch_timeout = IntegerVar(
+            default=10,
+            description="HTTP timeout in seconds for each lightweight file request.",
+        )
+        include_disabled = BooleanVar(
+            default=False,
+            description="Include disabled IntentSource rows in analysis.",
+        )
+
+        class Meta:
+            name = "Analyze Intent Sources"
+            description = "Analyze IntentSource records and persist desired services plus dependencies."
+            has_sensitive_variables = False
+
+        def run(self, fetch_timeout: int, include_disabled: bool) -> None:
+            queryset = IntentSource.objects.all()
+            if not include_disabled:
+                queryset = queryset.filter(enabled=True)
+            intent_sources = list(queryset.order_by("url"))
+            entries = [_repository_entry_from_intent_source(intent_source) for intent_source in intent_sources]
+            source_by_url = {intent_source.url: intent_source for intent_source in intent_sources}
+
+            result = analyze_repositories(entries, fetch_timeout=float(fetch_timeout))
+            now = timezone.now()
+            counts = {
+                "intent_sources": len(intent_sources),
+                "source_analyses": len(result.repository_analysis),
+                "services_created": 0,
+                "services_updated": 0,
+                "dependencies_created": 0,
+                "dependencies_replaced": 0,
+                "analysis_errors": len(result.errors),
+            }
+
+            for analysis in result.repository_analysis:
+                intent_source = source_by_url.get(analysis.get("url"))
+                if intent_source is None:
+                    continue
+                intent_source.last_import_status = analysis.get("status")
+                intent_source.last_imported_at = now
+                intent_source.last_import_summary = analysis
+                intent_source.save(
+                    update_fields=("last_import_status", "last_imported_at", "last_import_summary")
+                )
+
+            for service in result.desired_services:
+                source = service.get("intent_source") if isinstance(service.get("intent_source"), dict) else {}
+                intent_source = source_by_url.get(source.get("url"))
+                if intent_source is None:
+                    self.logger.warning("Skipping desired service without matching intent source: %s", _json(service))
+                    continue
+
+                identity = desired_service_identity(service)
+                defaults = desired_service_defaults(service)
+                defaults["last_analyzed_at"] = now
+                service_obj, created = DesiredService.objects.update_or_create(
+                    intent_source=intent_source,
+                    catalog_namespace=identity["catalog_namespace"],
+                    catalog_metadata_name=identity["catalog_metadata_name"],
+                    service_type=identity["service_type"],
+                    defaults=defaults,
+                )
+                if created:
+                    counts["services_created"] += 1
+                else:
+                    counts["services_updated"] += 1
+
+                old_dependency_count = service_obj.dependencies.count()
+                service_obj.dependencies.all().delete()
+                counts["dependencies_replaced"] += old_dependency_count
+                dependencies = [
+                    DesiredDependency(source_service=service_obj, **dependency)
+                    for dependency in desired_service_dependencies(service)
+                ]
+                DesiredDependency.objects.bulk_create(dependencies)
+                counts["dependencies_created"] += len(dependencies)
+
+            for error in result.errors:
+                self.logger.warning(error)
+
+            self.logger.info("Desired service import summary: %s", _json(counts))
+
+    jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources)
+
+
+def _configured_source_file():
+    plugins_config = getattr(settings, "PLUGINS_CONFIG", {}) or {}
+    app_config = plugins_config.get("nautobot_intent_catalog", {}) or {}
+    return app_config.get("intent_sources_file")
+
+
+def _json(value) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=True)
+
+
+def _repository_entry_from_intent_source(intent_source) -> RepositoryEntry:
+    source_config = intent_source.source_config or {}
+    return RepositoryEntry(
+        url=intent_source.url,
+        enabled=intent_source.enabled,
+        ref=intent_source.ref,
+        owner=intent_source.owner,
+        service_hint=source_config.get("service_hint") or intent_source.name,
+        catalog_paths=list(source_config.get("catalog_paths") or []),
+        basic_file_paths=list(source_config.get("basic_file_paths") or []),
+        raw_url_template=source_config.get("raw_url_template"),
+    )
+
+
+def _object_matches_defaults(obj, defaults: dict) -> bool:
+    return all(getattr(obj, key) == value for key, value in defaults.items())

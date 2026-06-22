@@ -1,0 +1,121 @@
+"""Views for the Nautobot Intent Catalog App."""
+
+from django.conf import settings
+from django.shortcuts import render
+
+from .loaders import load_default_service_repositories
+
+try:
+    from nautobot.apps.views import ObjectDeleteView, ObjectEditView, ObjectListView, ObjectView
+
+    from .filters import DesiredDependencyFilterSet, DesiredServiceFilterSet, IntentSourceFilterSet
+    from .forms import DesiredDependencyForm, DesiredServiceForm, IntentSourceForm
+    from .models import DesiredDependency, DesiredService, IntentSource
+    from .tables import DesiredDependencyTable, DesiredServiceTable, IntentSourceTable
+except ImportError:  # pragma: no cover - Nautobot is unavailable in local unit tests.
+    pass
+else:
+
+    class IntentSourceListView(ObjectListView):
+        """List DB-backed intent source records."""
+
+        queryset = IntentSource.objects.all()
+        filterset = IntentSourceFilterSet
+        table = IntentSourceTable
+
+
+    class IntentSourceView(ObjectView):
+        """Show one intent source record."""
+
+        queryset = IntentSource.objects.all()
+
+
+    class IntentSourceEditView(ObjectEditView):
+        """Create or edit an intent source record."""
+
+        queryset = IntentSource.objects.all()
+        model_form = IntentSourceForm
+
+
+    class IntentSourceDeleteView(ObjectDeleteView):
+        """Delete an intent source record."""
+
+        queryset = IntentSource.objects.all()
+
+
+    class DesiredServiceListView(ObjectListView):
+        """List desired service records."""
+
+        queryset = DesiredService.objects.select_related("intent_source")
+        filterset = DesiredServiceFilterSet
+        table = DesiredServiceTable
+
+
+    class DesiredServiceView(ObjectView):
+        """Show one desired service record."""
+
+        queryset = DesiredService.objects.select_related("intent_source")
+
+
+    class DesiredServiceEditView(ObjectEditView):
+        """Edit a desired service record."""
+
+        queryset = DesiredService.objects.all()
+        model_form = DesiredServiceForm
+
+
+    class DesiredServiceDeleteView(ObjectDeleteView):
+        """Delete a desired service record."""
+
+        queryset = DesiredService.objects.all()
+
+
+    class DesiredDependencyListView(ObjectListView):
+        """List desired dependency records."""
+
+        queryset = DesiredDependency.objects.select_related("source_service", "resolved_service")
+        filterset = DesiredDependencyFilterSet
+        table = DesiredDependencyTable
+
+
+    class DesiredDependencyView(ObjectView):
+        """Show one desired dependency record."""
+
+        queryset = DesiredDependency.objects.select_related("source_service", "resolved_service")
+
+
+    class DesiredDependencyEditView(ObjectEditView):
+        """Edit a desired dependency record."""
+
+        queryset = DesiredDependency.objects.all()
+        model_form = DesiredDependencyForm
+
+
+    class DesiredDependencyDeleteView(ObjectDeleteView):
+        """Delete a desired dependency record."""
+
+        queryset = DesiredDependency.objects.all()
+
+
+def source_yaml_repository_list(request):
+    """Render the configured intent source input list directly from YAML."""
+
+    result = load_default_service_repositories(_configured_source_file())
+    return render(
+        request,
+        "nautobot_intent_catalog/repository_list.html",
+        {
+            "source_path": result.source_path,
+            "repositories": result.repositories,
+            "errors": result.errors,
+        },
+    )
+
+
+repository_list = source_yaml_repository_list
+
+
+def _configured_source_file():
+    plugins_config = getattr(settings, "PLUGINS_CONFIG", {}) or {}
+    app_config = plugins_config.get("nautobot_intent_catalog", {}) or {}
+    return app_config.get("intent_sources_file")

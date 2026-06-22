@@ -1,4 +1,4 @@
-"""Load service repository input data for display."""
+"""Load intent source input data for display."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-DEFAULT_SERVICE_REPOSITORIES_ENV = "NAUTOBOT_SERVICE_REPOSITORIES_FILE"
+DEFAULT_SERVICE_REPOSITORIES_ENV = "NAUTOBOT_INTENT_SOURCES_FILE"
 DEFAULT_CATALOG_PATHS = ("catalog-info.yaml", "backstage/catalog-info.yaml")
 DEFAULT_BASIC_FILE_PATHS = (
     "README.md",
@@ -23,7 +23,7 @@ DEFAULT_BASIC_FILE_PATHS = (
 
 @dataclass(frozen=True)
 class RepositoryEntry:
-    """One row from service_repositories.yaml normalized for display."""
+    """One Git repository-style intent source row normalized for display."""
 
     url: str
     enabled: bool = True
@@ -47,7 +47,7 @@ class RepositoryLoadResult:
 
 
 def default_repository_file(configured_path: str | Path | None = None) -> Path:
-    """Return the default service_repositories.yaml path."""
+    """Return the default intent source YAML path."""
 
     if configured_path:
         return _resolve_configured_path(configured_path)
@@ -56,7 +56,7 @@ def default_repository_file(configured_path: str | Path | None = None) -> Path:
     if override:
         return _resolve_configured_path(override)
 
-    return Path.cwd() / "nauto" / "seed" / "service_repositories.yaml"
+    return Path.cwd() / "nauto" / "seed" / "intent_sources.yaml"
 
 
 def load_default_service_repositories(configured_path: str | Path | None = None) -> RepositoryLoadResult:

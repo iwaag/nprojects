@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nautobot_service_catalog.loaders import (
+from nautobot_intent_catalog.loaders import (
     DEFAULT_BASIC_FILE_PATHS,
     DEFAULT_CATALOG_PATHS,
     load_service_repositories,

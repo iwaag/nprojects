@@ -4,14 +4,14 @@
 <div class="container-fluid">
     <div class="row">
         <div class="col-md-12">
-            <h1>Service Repositories</h1>
+            <h1>Intent Sources</h1>
             <p class="text-muted">
                 Source: <code>{{ source_path }}</code>
             </p>
 
             {% if errors %}
                 <div class="alert alert-warning" role="alert">
-                    <strong>Repository catalog issues</strong>
+                    <strong>Intent source catalog issues</strong>
                     <ul>
                         {% for error in errors %}
                             <li>{{ error }}</li>
@@ -29,7 +29,7 @@
                                 <th>Enabled</th>
                                 <th>Ref</th>
                                 <th>Owner</th>
-                                <th>Service Hint</th>
+                                <th>Source Hint</th>
                                 <th>Catalog Paths</th>
                                 <th>Basic File Paths</th>
                                 <th>Raw URL Template</th>
@@ -80,7 +80,7 @@
             {% else %}
                 <div class="panel panel-default">
                     <div class="panel-body">
-                        No service repositories are registered.
+                        No intent sources are registered.
                     </div>
                 </div>
             {% endif %}

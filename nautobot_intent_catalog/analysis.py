@@ -63,7 +63,7 @@ def analyze_repositories(
     fetch_timeout: float,
     fetcher: Any | None = None,
 ) -> RepositoryAnalysisResult:
-    """Analyze repository catalog files and return dry-run service candidates."""
+    """Analyze repository catalog files and return dry-run desired services."""
 
     active_fetcher = fetcher or RepositoryFileFetcher(timeout=fetch_timeout)
     analyses = []
@@ -116,7 +116,7 @@ def analyze_repository(
         )
 
     default_branch = fetcher.default_branch(repository)
-    refs = _candidate_refs(repository, default_branch)
+    refs = _service_refs(repository, default_branch)
     catalog_file = fetcher.fetch_first(repository, repository.catalog_paths, refs)
     basic_files = fetcher.fetch_many(repository, repository.basic_file_paths, refs)
     checked_files = sorted({*repository.catalog_paths, *repository.basic_file_paths})
@@ -282,7 +282,7 @@ def _slugify(value: str) -> str:
 def _headers() -> dict[str, str]:
     headers = {
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "nautobot-service-catalog-analysis",
+        "User-Agent": "nautobot-intent-catalog-analysis",
     }
     github_token = os.environ.get("GITHUB_TOKEN")
     if github_token:
@@ -325,7 +325,7 @@ def _gitlab_project_path(url: str) -> tuple[str, str] | None:
     return parsed.netloc, "/".join(parts)
 
 
-def _candidate_refs(repository: RepositoryEntry, default_branch: str | None) -> list[str]:
+def _service_refs(repository: RepositoryEntry, default_branch: str | None) -> list[str]:
     refs = []
     if repository.ref:
         refs.append(repository.ref)
@@ -488,7 +488,7 @@ def _entity_to_desired_service(
         "max_instances": 1,
         "prefers_gpu": False,
         "protocol": "http",
-        "source_repository": {
+        "intent_source": {
             "url": repository.url,
             "ref": catalog_file.ref,
             "catalog_path": catalog_file.path,

@@ -1,44 +1,47 @@
-"""Forms for Service Catalog models."""
+"""Forms for Intent Catalog models."""
 
 from __future__ import annotations
 
 try:
     from nautobot.apps.forms import NautobotModelForm
 
-    from .models import DesiredServiceCandidate, ServiceDependency, ServiceRepository
+    from .models import DesiredDependency, DesiredService, IntentSource
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
 
-    class ServiceRepositoryForm(NautobotModelForm):
-        """Create/edit form for repository inputs."""
+    class IntentSourceForm(NautobotModelForm):
+        """Create/edit form for intent sources."""
 
         class Meta:
-            model = ServiceRepository
+            model = IntentSource
             fields = (
+                "name",
+                "slug",
+                "source_type",
                 "url",
-                "enabled",
                 "ref",
+                "enabled",
                 "owner",
-                "service_hint",
-                "catalog_paths",
-                "basic_file_paths",
-                "raw_url_template",
-                "last_analysis_status",
-                "last_analysis_summary",
+                "description",
+                "source_config",
+                "last_import_status",
+                "last_import_summary",
             )
 
 
-    class DesiredServiceCandidateForm(NautobotModelForm):
-        """Edit form for generated service candidates."""
+    class DesiredServiceForm(NautobotModelForm):
+        """Edit form for desired services."""
 
         class Meta:
-            model = DesiredServiceCandidate
+            model = DesiredService
             fields = (
                 "name",
+                "slug",
                 "display_name",
-                "role",
-                "source_repository",
+                "service_type",
+                "lifecycle",
+                "intent_source",
                 "source_ref",
                 "source_catalog_path",
                 "catalog_kind",
@@ -46,25 +49,22 @@ else:
                 "catalog_metadata_name",
                 "catalog_owner",
                 "catalog_lifecycle",
-                "catalog_spec_type",
                 "prefers_gpu",
                 "min_memory_gb",
-                "analysis_status",
-                "analysis_confidence",
-                "analysis_reasons",
-                "analysis_warnings",
+                "requirements",
+                "placement_policy",
                 "notes",
             )
 
 
-    class ServiceDependencyForm(NautobotModelForm):
+    class DesiredDependencyForm(NautobotModelForm):
         """Edit form for dependency metadata."""
 
         class Meta:
-            model = ServiceDependency
+            model = DesiredDependency
             fields = (
                 "source_service",
-                "kind",
+                "dependency_kind",
                 "namespace",
                 "name",
                 "raw_ref",
