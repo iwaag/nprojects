@@ -10,13 +10,15 @@ try:
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
+    TABLE_ACTION_BUTTONS = ("edit", "delete")
+
 
     class IntentSourceTable(BaseTable):
         """Intent source list table."""
 
         pk = ToggleColumn()
         name = tables.LinkColumn()
-        actions = ButtonsColumn(IntentSource)
+        actions = ButtonsColumn(IntentSource, buttons=TABLE_ACTION_BUTTONS)
 
         class Meta(BaseTable.Meta):
             model = IntentSource
@@ -51,7 +53,7 @@ else:
         name = tables.LinkColumn()
         intent_source = tables.LinkColumn()
         dependency_count = tables.Column(empty_values=(), verbose_name="Dependencies")
-        actions = ButtonsColumn(DesiredService)
+        actions = ButtonsColumn(DesiredService, buttons=TABLE_ACTION_BUTTONS)
 
         def render_dependency_count(self, record):
             """Return dependency count for display."""
@@ -90,7 +92,7 @@ else:
         pk = ToggleColumn()
         source_service = tables.LinkColumn()
         resolved_service = tables.LinkColumn()
-        actions = ButtonsColumn(DesiredDependency)
+        actions = ButtonsColumn(DesiredDependency, buttons=TABLE_ACTION_BUTTONS)
 
         class Meta(BaseTable.Meta):
             model = DesiredDependency
@@ -125,7 +127,7 @@ else:
         realized_device = tables.LinkColumn()
         realized_vm = tables.LinkColumn()
         endpoint_count = tables.Column(empty_values=(), verbose_name="Endpoints")
-        actions = ButtonsColumn(DesiredNode)
+        actions = ButtonsColumn(DesiredNode, buttons=TABLE_ACTION_BUTTONS)
 
         def render_endpoint_count(self, record):
             """Return endpoint count for display."""
@@ -165,7 +167,7 @@ else:
         name = tables.LinkColumn()
         desired_node = tables.LinkColumn()
         realized_ip_address = tables.LinkColumn()
-        actions = ButtonsColumn(DesiredEndpoint)
+        actions = ButtonsColumn(DesiredEndpoint, buttons=TABLE_ACTION_BUTTONS)
 
         class Meta(BaseTable.Meta):
             model = DesiredEndpoint
@@ -202,7 +204,7 @@ else:
 
         pk = ToggleColumn()
         target_type = tables.LinkColumn()
-        actions = ButtonsColumn(IntentEvaluation)
+        actions = ButtonsColumn(IntentEvaluation, buttons=TABLE_ACTION_BUTTONS)
 
         class Meta(BaseTable.Meta):
             model = IntentEvaluation
