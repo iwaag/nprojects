@@ -59,6 +59,7 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
+- Provides `Quick Host Add` for creating one desired node and one primary endpoint from one Nautobot form.
 - Persists `IntentEvaluation` rows for desired-vs-actual gap data.
 - Exports deterministic dnsmasq records from eligible desired endpoints.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
@@ -122,6 +123,27 @@ in the same YAML input. Missing node references are reported as deterministic
 validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
 intent can be captured before a Nautobot `IPAddress` exists; actual state is
 linked separately through `realized_ip_address`.
+
+## Quick Host Add
+
+Use `Quick Host Add` for the common case where one host needs one primary DNS
+name and one IP address. It is available from the `Intent Catalog` navigation
+near `Desired Nodes`, and directly at:
+
+```text
+/plugins/intent-catalog/nodes/quick-add/
+```
+
+Quick Host Add does not create a separate host model. It writes the same
+canonical records used everywhere else:
+
+- one `DesiredNode`
+- one primary `DesiredEndpoint`
+
+Use the normal `DesiredNode` and `DesiredEndpoint` CRUD screens when a host
+needs multiple endpoints, non-primary endpoint types, realized object links, or
+fine-grained endpoint edits. Use YAML import when the desired state should be
+managed from a source file or reviewed as a batch.
 
 ## dnsmasq Export
 

@@ -3,12 +3,99 @@
 from __future__ import annotations
 
 try:
+    from django import forms
+    from django.utils.text import slugify
     from nautobot.apps.forms import NautobotModelForm
 
     from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
+
+    class DesiredHostQuickAddForm(forms.Form):
+        """Quick-add form for one desired node and its primary endpoint."""
+
+        name = forms.CharField(max_length=255)
+        slug = forms.SlugField(max_length=255, required=False)
+        node_type = forms.ChoiceField(
+            choices=DesiredNode.NODE_TYPE_CHOICES,
+            initial=DesiredNode.NODE_TYPE_VIRTUAL_MACHINE,
+        )
+        lifecycle = forms.ChoiceField(
+            choices=DesiredNode.LIFECYCLE_CHOICES,
+            initial=DesiredNode.LIFECYCLE_PLANNED,
+        )
+        role = forms.CharField(max_length=255, required=False)
+        description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+        intent_source = forms.ModelChoiceField(queryset=IntentSource.objects.all(), required=False)
+        ip_address = forms.CharField(max_length=128, required=False)
+        dns_name = forms.CharField(max_length=255, required=False)
+        mdns_name = forms.CharField(max_length=255, required=False)
+        vpn_dns_name = forms.CharField(max_length=255, required=False)
+        protocol = forms.CharField(max_length=64, required=False)
+        port = forms.IntegerField(required=False, min_value=1, max_value=65535)
+        generate_dnsmasq = forms.BooleanField(required=False, initial=True)
+        dnsmasq_record_type = forms.ChoiceField(
+            choices=DesiredEndpoint.DNSMASQ_RECORD_TYPE_CHOICES,
+            initial=DesiredEndpoint.DNSMASQ_HOST_RECORD,
+        )
+        endpoint_name = forms.CharField(
+            max_length=255,
+            initial=DesiredEndpoint.ENDPOINT_TYPE_PRIMARY,
+            widget=forms.HiddenInput,
+        )
+        endpoint_type = forms.ChoiceField(
+            choices=DesiredEndpoint.ENDPOINT_TYPE_CHOICES,
+            initial=DesiredEndpoint.ENDPOINT_TYPE_PRIMARY,
+            widget=forms.HiddenInput,
+        )
+
+        def clean_slug(self):
+            """Generate a slug from name when omitted."""
+
+            slug = self.cleaned_data.get("slug")
+            if slug:
+                return slug
+
+            generated_slug = slugify(self.cleaned_data.get("name") or "")
+            if not generated_slug:
+                raise forms.ValidationError("Enter a slug or a name that can be converted to a slug.")
+            return generated_slug
+
+        def node_data(self):
+            """Return cleaned values for DesiredNode creation."""
+
+            return {
+                "name": self.cleaned_data["name"],
+                "slug": self.cleaned_data["slug"],
+                "node_type": self.cleaned_data["node_type"],
+                "lifecycle": self.cleaned_data["lifecycle"],
+                "role": self.cleaned_data.get("role"),
+                "description": self.cleaned_data.get("description"),
+                "intent_source": self.cleaned_data.get("intent_source"),
+            }
+
+        def endpoint_data(self):
+            """Return cleaned values for DesiredEndpoint creation."""
+
+            return {
+                "ip_address": self.cleaned_data.get("ip_address"),
+                "dns_name": self.cleaned_data.get("dns_name"),
+                "mdns_name": self.cleaned_data.get("mdns_name"),
+                "vpn_dns_name": self.cleaned_data.get("vpn_dns_name"),
+                "protocol": self.cleaned_data.get("protocol"),
+                "port": self.cleaned_data.get("port"),
+                "generate_dnsmasq": self.cleaned_data.get("generate_dnsmasq"),
+                "dnsmasq_record_type": self.cleaned_data["dnsmasq_record_type"],
+                "endpoint_name": self.cleaned_data["endpoint_name"],
+                "endpoint_type": self.cleaned_data["endpoint_type"],
+            }
+
+        def operation_kwargs(self):
+            """Return operation-ready keyword arguments."""
+
+            return {**self.node_data(), **self.endpoint_data()}
+
 
     class IntentSourceForm(NautobotModelForm):
         """Create/edit form for intent sources."""

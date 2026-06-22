@@ -29,6 +29,10 @@ else:
                             name="Desired Nodes",
                         ),
                         NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:desiredhost_quick_add",
+                            name="Quick Host Add",
+                        ),
+                        NavMenuItem(
                             link="plugins:nautobot_intent_catalog:desiredendpoint_list",
                             name="Desired Endpoints",
                         ),

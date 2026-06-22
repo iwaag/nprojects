@@ -41,6 +41,7 @@ if hasattr(views, "IntentSourceListView"):
                 name="desireddependency_delete",
             ),
             path("nodes/", views.DesiredNodeListView.as_view(), name="desirednode_list"),
+            path("nodes/quick-add/", views.DesiredHostQuickAddView.as_view(), name="desiredhost_quick_add"),
             path("nodes/add/", views.DesiredNodeEditView.as_view(), name="desirednode_add"),
             path("nodes/<uuid:pk>/", views.DesiredNodeView.as_view(), name="desirednode"),
             path("nodes/<uuid:pk>/edit/", views.DesiredNodeEditView.as_view(), name="desirednode_edit"),

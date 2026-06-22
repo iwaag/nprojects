@@ -1,7 +1,10 @@
 """Views for the Nautobot Intent Catalog App."""
 
 from django.conf import settings
+from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.shortcuts import render
+from django.views.generic.edit import FormView
 
 from .loaders import load_default_intent_sources
 
@@ -19,12 +22,14 @@ try:
     from .forms import (
         DesiredDependencyForm,
         DesiredEndpointForm,
+        DesiredHostQuickAddForm,
         DesiredNodeForm,
         DesiredServiceForm,
         IntentEvaluationForm,
         IntentSourceForm,
     )
     from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .operations import create_desired_node_with_primary_endpoint
     from .tables import (
         DesiredDependencyTable,
         DesiredEndpointTable,
@@ -145,6 +150,31 @@ else:
         queryset = DesiredNode.objects.all()
 
 
+    class DesiredHostQuickAddView(FormView):
+        """Create one desired node and its primary desired endpoint."""
+
+        form_class = DesiredHostQuickAddForm
+        template_name = "nautobot_intent_catalog/desiredhost_quick_add.html"
+
+        def form_valid(self, form):
+            try:
+                self.result = create_desired_node_with_primary_endpoint(**form.operation_kwargs())
+            except ValidationError as exc:
+                _add_validation_errors(form, exc)
+                return self.form_invalid(form)
+
+            endpoint = self.result.desired_endpoint
+            endpoint_summary = _endpoint_summary(endpoint)
+            messages.success(
+                self.request,
+                f"Created desired node {self.result.desired_node} with endpoint {endpoint.name}{endpoint_summary}.",
+            )
+            return super().form_valid(form)
+
+        def get_success_url(self):
+            return self.result.desired_node.get_absolute_url() if hasattr(self, "result") else super().get_success_url()
+
+
     class DesiredEndpointListView(ObjectListView):
         """List desired endpoint records."""
 
@@ -197,6 +227,19 @@ else:
         """Delete an intent evaluation record."""
 
         queryset = IntentEvaluation.objects.all()
+
+
+    def _add_validation_errors(form, exc):
+        if hasattr(exc, "message_dict"):
+            for field_name, errors in exc.message_dict.items():
+                form.add_error(None if field_name == "__all__" else field_name, errors)
+            return
+        form.add_error(None, exc)
+
+
+    def _endpoint_summary(endpoint):
+        details = [value for value in (endpoint.ip_address, endpoint.dns_name) if value]
+        return f" ({', '.join(details)})" if details else ""
 
 
 def source_yaml_intent_source_list(request):

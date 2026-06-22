@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8 col-md-offset-2">
+            <h1>Quick Host Add</h1>
+
+            <form method="post" class="form form-horizontal">
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                {{ form.endpoint_name }}
+                {{ form.endpoint_type }}
+
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <strong>Desired Node</strong>
+                    </div>
+                    <div class="panel-body">
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.name %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.slug %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.node_type %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.lifecycle %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.role %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.description %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.intent_source %}
+                    </div>
+                </div>
+
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <strong>Primary Endpoint</strong>
+                    </div>
+                    <div class="panel-body">
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.ip_address %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.dns_name %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.mdns_name %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.vpn_dns_name %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.protocol %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.port %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.generate_dnsmasq %}
+                        {% include "nautobot_intent_catalog/inc/quick_add_field.html" with field=form.dnsmasq_record_type %}
+                    </div>
+                </div>
+
+                <div class="text-right">
+                    <a href="{% url 'plugins:nautobot_intent_catalog:desirednode_list' %}" class="btn btn-default">Cancel</a>
+                    <button type="submit" class="btn btn-primary">Create Host</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}
