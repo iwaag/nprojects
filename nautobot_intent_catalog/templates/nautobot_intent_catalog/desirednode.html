@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <h1>{{ object.name }}</h1>
+
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <strong>Desired Node</strong>
+                </div>
+                <table class="table table-hover attr-table">
+                    <tr>
+                        <th scope="row">Name</th>
+                        <td>{{ object.name }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Slug</th>
+                        <td><code>{{ object.slug }}</code></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Node Type</th>
+                        <td>{{ object.get_node_type_display|default:object.node_type }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Lifecycle</th>
+                        <td>{{ object.get_lifecycle_display|default:object.lifecycle }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Role</th>
+                        <td>{{ object.role|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Intent Source</th>
+                        <td>{{ object.intent_source|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Realized Device</th>
+                        <td>{{ object.realized_device|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Realized VM</th>
+                        <td>{{ object.realized_vm|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Description</th>
+                        <td>{{ object.description|default:"-" }}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <strong>Desired Endpoints</strong>
+                </div>
+                {% with endpoints=object.desired_endpoints.all %}
+                    {% if endpoints %}
+                        <div class="table-responsive">
+                            <table class="table table-hover table-headings">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Type</th>
+                                        <th>IP Address</th>
+                                        <th>DNS Name</th>
+                                        <th>mDNS Name</th>
+                                        <th>VPN DNS Name</th>
+                                        <th>Protocol</th>
+                                        <th>Port</th>
+                                        <th>dnsmasq</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for endpoint in endpoints %}
+                                        <tr>
+                                            <td>
+                                                <a href="{{ endpoint.get_absolute_url }}">{{ endpoint.name }}</a>
+                                            </td>
+                                            <td>{{ endpoint.get_endpoint_type_display|default:endpoint.endpoint_type }}</td>
+                                            <td>{{ endpoint.ip_address|default:"-" }}</td>
+                                            <td>{{ endpoint.dns_name|default:"-" }}</td>
+                                            <td>{{ endpoint.mdns_name|default:"-" }}</td>
+                                            <td>{{ endpoint.vpn_dns_name|default:"-" }}</td>
+                                            <td>{{ endpoint.protocol|default:"-" }}</td>
+                                            <td>{{ endpoint.port|default:"-" }}</td>
+                                            <td>{{ endpoint.generate_dnsmasq|yesno:"Yes,No" }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="panel-body">
+                            No desired endpoints are registered.
+                        </div>
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}
