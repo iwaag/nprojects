@@ -1,0 +1,172 @@
+"""Host-oriented use-case operations."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+try:
+    from django.core.exceptions import ValidationError
+    from django.db import IntegrityError, transaction
+
+    from nautobot_intent_catalog.models import DesiredEndpoint, DesiredNode
+except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
+    ValidationError = None  # type: ignore[assignment]
+    IntegrityError = Exception  # type: ignore[assignment]
+    transaction = None  # type: ignore[assignment]
+    DesiredEndpoint = None  # type: ignore[assignment]
+    DesiredNode = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
+class DesiredHostCreationResult:
+    """Objects created by a quick host registration operation."""
+
+    desired_node: Any
+    desired_endpoint: Any
+
+
+def create_desired_node_with_primary_endpoint(
+    *,
+    name: str,
+    slug: str,
+    node_type: str = "device",
+    lifecycle: str = "planned",
+    role: str | None = None,
+    description: str | None = None,
+    intent_source: Any | None = None,
+    intent_source_id: Any | None = None,
+    ip_address: str | None = None,
+    dns_name: str | None = None,
+    mdns_name: str | None = None,
+    vpn_dns_name: str | None = None,
+    protocol: str | None = None,
+    port: int | None = None,
+    generate_dnsmasq: bool = True,
+    dnsmasq_record_type: str = "host_record",
+    endpoint_name: str = "primary",
+    endpoint_type: str = "primary",
+) -> DesiredHostCreationResult:
+    """Create a desired node and its primary endpoint in one atomic operation.
+
+    The operation intentionally raises Django ``ValidationError`` with a
+    field-keyed error dictionary so forms and future API views can present the
+    same validation result.
+    """
+
+    _require_django()
+    if intent_source is not None and intent_source_id is not None:
+        _raise_validation_error({"intent_source": ["Pass either intent_source or intent_source_id, not both."]})
+
+    cleaned = {
+        "name": _required_str(name, "name"),
+        "slug": _required_str(slug, "slug"),
+        "node_type": _required_str(node_type, "node_type"),
+        "lifecycle": _required_str(lifecycle, "lifecycle"),
+        "role": _optional_str(role),
+        "description": _optional_str(description),
+        "ip_address": _optional_str(ip_address),
+        "dns_name": _optional_str(dns_name),
+        "mdns_name": _optional_str(mdns_name),
+        "vpn_dns_name": _optional_str(vpn_dns_name),
+        "protocol": _optional_str(protocol),
+        "port": port,
+        "dnsmasq_record_type": _required_str(dnsmasq_record_type, "dnsmasq_record_type"),
+        "endpoint_name": _required_str(endpoint_name, "endpoint_name"),
+        "endpoint_type": _required_str(endpoint_type, "endpoint_type"),
+    }
+
+    _validate_node_identity(name=cleaned["name"], slug=cleaned["slug"])
+
+    node_kwargs = {
+        "name": cleaned["name"],
+        "slug": cleaned["slug"],
+        "node_type": cleaned["node_type"],
+        "lifecycle": cleaned["lifecycle"],
+        "role": cleaned["role"],
+        "description": cleaned["description"],
+        "intent_source": intent_source,
+    }
+    if intent_source_id is not None:
+        node_kwargs["intent_source_id"] = intent_source_id
+
+    try:
+        with transaction.atomic():
+            desired_node = DesiredNode(**node_kwargs)
+            desired_node.full_clean()
+            desired_node.save()
+
+            _validate_endpoint_identity(
+                desired_node=desired_node,
+                endpoint_name=cleaned["endpoint_name"],
+                endpoint_type=cleaned["endpoint_type"],
+            )
+            desired_endpoint = DesiredEndpoint(
+                desired_node=desired_node,
+                name=cleaned["endpoint_name"],
+                endpoint_type=cleaned["endpoint_type"],
+                ip_address=cleaned["ip_address"],
+                dns_name=cleaned["dns_name"],
+                mdns_name=cleaned["mdns_name"],
+                vpn_dns_name=cleaned["vpn_dns_name"],
+                protocol=cleaned["protocol"],
+                port=cleaned["port"],
+                generate_dnsmasq=generate_dnsmasq,
+                dnsmasq_record_type=cleaned["dnsmasq_record_type"],
+            )
+            desired_endpoint.full_clean()
+            desired_endpoint.save()
+    except IntegrityError as exc:
+        _raise_validation_error({"__all__": [f"Desired host could not be created because of a uniqueness conflict: {exc}"]})
+
+    return DesiredHostCreationResult(desired_node=desired_node, desired_endpoint=desired_endpoint)
+
+
+def _validate_node_identity(*, name: str, slug: str) -> None:
+    errors: dict[str, list[str]] = {}
+    if DesiredNode.objects.filter(slug=slug).exists():
+        errors["slug"] = ["A desired node with this slug already exists."]
+    if DesiredNode.objects.filter(name=name).exists():
+        errors["name"] = ["A desired node with this name already exists."]
+    if errors:
+        _raise_validation_error(errors)
+
+
+def _validate_endpoint_identity(*, desired_node: Any, endpoint_name: str, endpoint_type: str) -> None:
+    if DesiredEndpoint.objects.filter(
+        desired_node=desired_node,
+        name=endpoint_name,
+        endpoint_type=endpoint_type,
+    ).exists():
+        _raise_validation_error(
+            {
+                "endpoint_name": [
+                    "A desired endpoint with this name and endpoint type already exists for the desired node."
+                ]
+            }
+        )
+
+
+def _required_str(value: Any, field_name: str) -> str:
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized:
+        _raise_validation_error({field_name: ["This field is required."]})
+    return normalized
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _require_django() -> None:
+    if ValidationError is None or transaction is None or DesiredNode is None or DesiredEndpoint is None:
+        raise RuntimeError("Django and Nautobot are required to run host operations.")
+
+
+def _raise_validation_error(errors: dict[str, list[str]]) -> None:
+    if ValidationError is None:
+        raise RuntimeError(errors)
+    raise ValidationError(errors)

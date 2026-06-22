@@ -66,6 +66,10 @@ nautobot-server migrate nautobot_intent_catalog
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
 - Does not run automated gap evaluation or remediation review yet.
 
+For the model intent and design boundaries behind `IntentSource`,
+`DesiredService`, `DesiredDependency`, `DesiredNode`, `DesiredEndpoint`, and
+`IntentEvaluation`, see [CONCEPT.md](CONCEPT.md).
+
 ## Intent Source YAML
 
 The loader accepts only the current `intent_sources`, `desired_nodes`, and
