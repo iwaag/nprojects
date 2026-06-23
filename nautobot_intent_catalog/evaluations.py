@@ -527,6 +527,13 @@ def _node_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[d
 def _actual_node_facts(object_type: str, actual: Any) -> dict[str, Any]:
     custom_fields = _custom_fields(actual)
     platform = _display_value(getattr(actual, "platform", None))
+    primary_mac_address = _normalize_mac(
+        _first_text(
+            custom_fields.get("primary_mac_address"),
+            custom_fields.get("primary_mac"),
+            custom_fields.get("mac_address"),
+        )
+    )
     return {
         "object_type": object_type,
         "id": _pk(actual),
@@ -539,6 +546,7 @@ def _actual_node_facts(object_type: str, actual: Any) -> dict[str, Any]:
         "serial": _first_text(getattr(actual, "serial", None), custom_fields.get("serial"), custom_fields.get("serial_number")),
         "uuid": _first_text(getattr(actual, "uuid", None), custom_fields.get("uuid"), custom_fields.get("node_uuid")),
         "platform": _first_text(platform, custom_fields.get("platform"), custom_fields.get("os")),
+        "primary_mac_address": primary_mac_address,
         "custom_fields": custom_fields,
         "interfaces": [_interface_facts(object_type, actual, interface) for interface in _interfaces(actual)],
         "interface_count": len(_interfaces(actual)),
@@ -593,6 +601,11 @@ def _interface_candidates_for_endpoint(
     for object_type, actual_node in actual_objects:
         for interface in _interfaces(actual_node):
             candidates.append(_interface_facts(object_type, actual_node, interface))
+    if not any(candidate.get("mac_address") for candidate in candidates):
+        for object_type, actual_node in actual_objects:
+            primary_candidate = _primary_mac_candidate(object_type, actual_node)
+            if primary_candidate:
+                candidates.append(primary_candidate)
 
     if candidates:
         return sorted(candidates, key=_interface_sort_key)
@@ -605,6 +618,10 @@ def _interface_candidates_for_endpoint(
             for interface in _list(actual.get("interfaces")):
                 if isinstance(interface, dict):
                     candidates.append(interface)
+            if not any(candidate.get("mac_address") for candidate in candidates):
+                primary_candidate = _primary_mac_candidate_from_facts(actual)
+                if primary_candidate:
+                    candidates.append(primary_candidate)
     return sorted(candidates, key=_interface_sort_key)
 
 
@@ -615,6 +632,52 @@ def _interface_facts(object_type: str, actual_node: Any, interface: Any) -> dict
         "interface_name": _text(getattr(interface, "name", None)),
         "mac_address": _normalize_mac(getattr(interface, "mac_address", None)),
         "enabled": bool(getattr(interface, "enabled", True)),
+    }
+
+
+def _primary_mac_candidate(object_type: str, actual_node: Any) -> dict[str, Any]:
+    custom_fields = _custom_fields(actual_node)
+    mac_address = _normalize_mac(
+        _first_text(
+            custom_fields.get("primary_mac_address"),
+            custom_fields.get("primary_mac"),
+            custom_fields.get("mac_address"),
+        )
+    )
+    if not mac_address:
+        return {}
+    return {
+        "actual_node_ref": _actual_ref(object_type, actual_node),
+        "interface_id": "",
+        "interface_name": "primary_mac_address",
+        "mac_address": mac_address,
+        "enabled": True,
+    }
+
+
+def _primary_mac_candidate_from_facts(actual: dict[str, Any]) -> dict[str, Any]:
+    custom_fields = _mapping(actual.get("custom_fields"))
+    mac_address = _normalize_mac(
+        _first_text(
+            actual.get("primary_mac_address"),
+            custom_fields.get("primary_mac_address"),
+            custom_fields.get("primary_mac"),
+            custom_fields.get("mac_address"),
+        )
+    )
+    if not mac_address:
+        return {}
+    actual_ref = {
+        "object_type": _text(actual.get("object_type")),
+        "id": _text(actual.get("id")),
+        "name": _text(actual.get("name")),
+    }
+    return {
+        "actual_node_ref": actual_ref,
+        "interface_id": "",
+        "interface_name": "primary_mac_address",
+        "mac_address": mac_address,
+        "enabled": True,
     }
 
 
@@ -675,7 +738,7 @@ def _target_ref(obj: Any) -> dict[str, Any]:
 
 
 def _custom_fields(obj: Any) -> dict[str, Any]:
-    for attr in ("custom_field_data", "_custom_field_data"):
+    for attr in ("custom_field_data", "_custom_field_data", "cf"):
         value = getattr(obj, attr, None)
         if isinstance(value, dict):
             return value

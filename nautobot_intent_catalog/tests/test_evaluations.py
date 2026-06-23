@@ -302,6 +302,49 @@ class EndpointEvaluationTests(unittest.TestCase):
             "pc1.local",
         )
 
+    def test_realized_device_primary_mac_custom_field_supplies_mac_candidate(self) -> None:
+        desired_node = node(
+            realized_device=actual_node(
+                _custom_field_data={"primary_mac_address": "AA-BB-CC-DD-EE-FF"},
+                interfaces=[],
+            )
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip())
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["dhcp_mac_candidates"][0]["mac_address"], "aa:bb:cc:dd:ee:ff")
+        self.assertEqual(payload.observed_facts["dhcp_mac_candidates"][0]["interface_name"], "primary_mac_address")
+
+    def test_node_evaluation_primary_mac_custom_field_supplies_mac_candidate(self) -> None:
+        desired_node = node(name="pc1", slug="pc1")
+        node_payload = evaluate_node_intent(
+            desired_node,
+            device_candidates=[
+                actual_node(
+                    name="pc1.local",
+                    _custom_field_data={"primary_mac_address": "AA-BB-CC-DD-EE-FF"},
+                    interfaces=[],
+                )
+            ],
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            node_evaluation=node_payload,
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["dhcp_mac_candidates"][0]["mac_address"], "aa:bb:cc:dd:ee:ff")
+        self.assertEqual(
+            payload.observed_facts["dhcp_mac_candidates"][0]["actual_node_ref"]["name"],
+            "pc1.local",
+        )
+
     def test_stored_node_evaluation_object_interfaces_supply_mac_candidates(self) -> None:
         stored_node_evaluation = obj(
             observed_facts={
@@ -331,6 +374,29 @@ class EndpointEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.status, "satisfied")
         self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
         self.assertEqual(payload.observed_facts["interface_candidates"][0]["interface_name"], "eth0")
+
+    def test_stored_node_evaluation_primary_mac_custom_field_supplies_mac_candidate(self) -> None:
+        stored_node_evaluation = obj(
+            observed_facts={
+                "actual": {
+                    "object_type": "dcim.device",
+                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "name": "pc1.local",
+                    "primary_mac_address": "aa:bb:cc:dd:ee:ff",
+                    "custom_fields": {"primary_mac_address": "aa:bb:cc:dd:ee:ff"},
+                    "interfaces": [],
+                }
+            }
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=node(name="pc1", slug="pc1"), realized_ip_address=actual_ip()),
+            node_evaluation=stored_node_evaluation,
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["interface_candidates"][0]["interface_name"], "primary_mac_address")
 
 
 class ServiceEvaluationTests(unittest.TestCase):
