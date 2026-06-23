@@ -106,3 +106,113 @@ register_jobs(*jobs)
 
 After changing job registration, run Nautobot's normal upgrade/sync workflow
 and restart both web and worker processes.
+
+## Nautobot 3.x Job import path notes
+
+Date: 2026-06-24
+
+### Symptoms
+
+The `nautobot_intent_catalog` app was installed and loaded by Nautobot 3.1.3,
+but none of its Jobs appeared in the Nautobot UI.
+
+The app itself was clearly present:
+
+- `PLUGINS = ["nautobot_intent_catalog"]` was configured.
+- migration output included `nautobot_intent_catalog`.
+- Nautobot logs emitted serializer warnings for `nautobot_intent_catalog`
+  models.
+
+However, importing the jobs module inside the running Nautobot container showed
+an empty module-level `jobs` tuple:
+
+```python
+import nautobot_intent_catalog.jobs as j
+print([job.__name__ for job in j.jobs])
+# []
+```
+
+This means Nautobot had no app Jobs to refresh/register, even though
+`nautobot_intent_catalog/jobs.py` existed in site-packages.
+
+### Cause
+
+`jobs.py` used old short Nautobot model import paths:
+
+```python
+from dcim.models import Device
+from ipam.models import IPAddress
+from virtualization.models import VirtualMachine
+```
+
+In the observed Nautobot 3.1.3 container these modules were not importable:
+
+```text
+ModuleNotFoundError: No module named 'dcim'
+ModuleNotFoundError: No module named 'ipam'
+ModuleNotFoundError: No module named 'virtualization'
+```
+
+The correct import paths in that environment are fully qualified under the
+`nautobot` package:
+
+```python
+from nautobot.dcim.models import Device
+from nautobot.ipam.models import IPAddress
+from nautobot.virtualization.models import VirtualMachine
+```
+
+The failure was hard to see because `jobs.py` wrapped all Nautobot imports in a
+single `try` block and handled any `ImportError` with:
+
+```python
+jobs = ()
+```
+
+That fallback is useful for local unit tests where Nautobot is not installed,
+but in a real Nautobot process it silently converts an import failure into "no
+Jobs exist".
+
+### Fix applied here
+
+- Updated `jobs.py` to use fully qualified Nautobot 3-compatible model imports:
+
+```python
+from nautobot.dcim.models import Device
+from nautobot.ipam.models import IPAddress
+from nautobot.virtualization.models import VirtualMachine
+```
+
+- Kept the local no-Nautobot fallback, but changed it so that if the `nautobot`
+  package is installed, `ImportError` is re-raised instead of being swallowed.
+
+The practical effect is:
+
+- local tests without Nautobot can still import loader/helper modules;
+- real Nautobot deployments fail loudly on broken app imports;
+- `jobs.py` can reach the Job class definitions and call `register_jobs(*jobs)`.
+
+### Future checklist
+
+When adding Job code that imports Nautobot models, prefer fully qualified
+Nautobot imports:
+
+```python
+from nautobot.dcim.models import Device
+from nautobot.ipam.models import IPAddress
+from nautobot.virtualization.models import VirtualMachine
+```
+
+Avoid broad `except ImportError: jobs = ()` behavior in production-facing Job
+modules. If a fallback is needed for local tests, only use it when Nautobot is
+not installed; otherwise re-raise the exception so startup logs show the real
+problem.
+
+For missing Jobs in Nautobot, check in this order:
+
+1. Import `nautobot_intent_catalog.jobs` inside the Nautobot container.
+2. Print `[job.__name__ for job in nautobot_intent_catalog.jobs.jobs]`.
+3. If the list is empty, investigate import failures before looking at UI
+   permissions or Job enablement.
+4. After fixing registration/imports, run the normal Nautobot upgrade/sync
+   workflow and restart web and worker processes.

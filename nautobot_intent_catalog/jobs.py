@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -30,13 +31,15 @@ from .loaders import load_default_intent_sources, load_intent_sources
 try:
     from django.conf import settings
     from django.utils import timezone
-    from dcim.models import Device
-    from ipam.models import IPAddress
+    from nautobot.dcim.models import Device
+    from nautobot.ipam.models import IPAddress
     from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar, register_jobs
-    from virtualization.models import VirtualMachine
+    from nautobot.virtualization.models import VirtualMachine
 
     from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
+    if importlib.util.find_spec("nautobot") is not None:
+        raise
     jobs = ()
 else:
 
