@@ -71,6 +71,9 @@ When adding object views for app models, either create the expected
 Generic `ObjectView` redirects can otherwise fail after a successful database
 write because the default detail template is missing.
 
+Keep `tests/test_templates.py` in sync with every default-template `ObjectView`;
+it catches missing detail templates without a Nautobot runtime.
+
 On Nautobot 3.1.x, `ButtonsColumn` includes a changelog action by default. If a
 model does not provide a changelog URL/view, pass an explicit button set such as
 `buttons=("edit", "delete")`. Also check related `tables.LinkColumn()` fields:

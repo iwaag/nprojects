@@ -1,5 +1,58 @@
 # Devlog Pickup
 
+## IntentEvaluation detail template gap
+
+Date: 2026-06-24
+
+### Symptoms
+
+Opening an `IntentEvaluation` detail page in Nautobot 3.1.3 failed with:
+
+```text
+django.template.exceptions.TemplateDoesNotExist: nautobot_intent_catalog/intentevaluation.html
+```
+
+The app was installed from GitHub into the container, so local workspace fixes
+would not affect the running service until pushed or installed from a local
+path and the image/container was rebuilt.
+
+### Cause
+
+`IntentEvaluationView` inherited from Nautobot's `ObjectView` without setting
+`template_name`. Nautobot therefore derived the detail template path from the
+app label and model name:
+
+```text
+nautobot_intent_catalog/intentevaluation.html
+```
+
+That template was not present. A horizontal check showed the same gap for other
+model detail views that also relied on default template resolution:
+
+```text
+nautobot_intent_catalog/intentsource.html
+nautobot_intent_catalog/desiredservice.html
+nautobot_intent_catalog/desireddependency.html
+```
+
+`desirednode.html` and `desiredendpoint.html` already existed because an earlier
+UI compatibility fix handled only the pages that had failed at that time.
+
+### Fix applied here
+
+- Added detail templates for `IntentSource`, `DesiredService`,
+  `DesiredDependency`, and `IntentEvaluation`.
+- Added a local unit test that checks all default `ObjectView` detail template
+  files exist, so this class of omission is caught without requiring Django or
+  Nautobot in the development workspace.
+
+### Future checklist
+
+When adding or renaming a Nautobot `ObjectView` for an app model, update the
+template checklist/test at the same time as the URL and view. Do not stop after
+fixing only the page that produced the first `TemplateDoesNotExist`; scan every
+`ObjectView` using default template resolution.
+
 ## Nautobot 3.1.3 UI compatibility notes
 
 Date: 2026-06-23

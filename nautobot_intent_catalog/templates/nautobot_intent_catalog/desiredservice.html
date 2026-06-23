@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <h1>{{ object.display_name|default:object.name }}</h1>
+
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <strong>Desired Service</strong>
+                </div>
+                <table class="table table-hover attr-table">
+                    <tr>
+                        <th scope="row">Name</th>
+                        <td>{{ object.name }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Slug</th>
+                        <td><code>{{ object.slug }}</code></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Display Name</th>
+                        <td>{{ object.display_name|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Service Type</th>
+                        <td>{{ object.get_service_type_display|default:object.service_type }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Lifecycle</th>
+                        <td>{{ object.get_lifecycle_display|default:object.lifecycle }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Intent Source</th>
+                        <td>
+                            {% if object.intent_source %}
+                                <a href="{{ object.intent_source.get_absolute_url }}">{{ object.intent_source }}</a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Source Ref</th>
+                        <td>{{ object.source_ref|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Source Catalog Path</th>
+                        <td>{{ object.source_catalog_path|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Catalog Entity</th>
+                        <td>
+                            {{ object.catalog_kind|default:"-" }} /
+                            {{ object.catalog_namespace|default:"-" }} /
+                            {{ object.catalog_metadata_name|default:"-" }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Catalog Owner</th>
+                        <td>{{ object.catalog_owner|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Catalog Lifecycle</th>
+                        <td>{{ object.catalog_lifecycle|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Prefers GPU</th>
+                        <td>{{ object.prefers_gpu|yesno:"Yes,No" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Minimum Memory GB</th>
+                        <td>{{ object.min_memory_gb|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Last Analyzed At</th>
+                        <td>{{ object.last_analyzed_at|default:"-" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Requirements</th>
+                        <td><pre>{{ object.requirements|default_if_none:"{}" }}</pre></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Placement Policy</th>
+                        <td><pre>{{ object.placement_policy|default_if_none:"{}" }}</pre></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Notes</th>
+                        <td>{{ object.notes|default:"-" }}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <strong>Desired Dependencies</strong>
+                </div>
+                {% with dependencies=object.dependencies.all %}
+                    {% if dependencies %}
+                        <div class="table-responsive">
+                            <table class="table table-hover table-headings">
+                                <thead>
+                                    <tr>
+                                        <th>Kind</th>
+                                        <th>Namespace</th>
+                                        <th>Name</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Resolved Service</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for dependency in dependencies %}
+                                        <tr>
+                                            <td>
+                                                <a href="{{ dependency.get_absolute_url }}">{{ dependency.dependency_kind }}</a>
+                                            </td>
+                                            <td>{{ dependency.namespace }}</td>
+                                            <td>{{ dependency.name }}</td>
+                                            <td>{{ dependency.dependency_type }}</td>
+                                            <td>{{ dependency.get_resolution_status_display|default:dependency.resolution_status }}</td>
+                                            <td>
+                                                {% if dependency.resolved_service %}
+                                                    <a href="{{ dependency.resolved_service.get_absolute_url }}">{{ dependency.resolved_service }}</a>
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="panel-body">
+                            No desired dependencies are registered.
+                        </div>
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}
