@@ -193,6 +193,27 @@ class EndpointEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.status, "conflict")
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "ip_address_mismatch")
 
+    def test_nautobot_3_ip_host_and_mask_length_are_matched(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        realized_ip = actual_ip(address=None, host="192.0.2.10", mask_length=32)
+        payload = evaluate_endpoint_intent(endpoint(desired_node=desired_node, realized_ip_address=realized_ip))
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertEqual(payload.actual_refs[0]["name"], "192.0.2.10/32")
+        self.assertEqual(payload.observed_facts["actual_ip_address"]["address"], "192.0.2.10/32")
+
+    def test_nautobot_3_ip_candidates_match_host_and_mask_length(self) -> None:
+        matching_ip = actual_ip(address=None, host="192.0.2.10", mask_length=32)
+        payload = evaluate_endpoint_intent(
+            endpoint(realized_ip_address=None, generate_dnsmasq=False),
+            ip_candidates=[matching_ip],
+        )
+
+        self.assertEqual(payload.status, "partial")
+        self.assertEqual(payload.actual_refs[0]["name"], "192.0.2.10/32")
+        self.assertEqual(payload.observed_facts["ip_candidates"][0]["facts"]["address"], "192.0.2.10/32")
+        self.assertEqual(payload.gap_summary["gaps"][0]["code"], "actual_ip_address_not_linked")
+
     def test_missing_ip_and_missing_mac_are_partial(self) -> None:
         desired_node = node(realized_device=actual_node(interfaces=[interface(mac_address=None)]))
         payload = evaluate_endpoint_intent(endpoint(desired_node=desired_node), ip_candidates=[])

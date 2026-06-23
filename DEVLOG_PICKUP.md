@@ -216,3 +216,61 @@ For missing Jobs in Nautobot, check in this order:
    permissions or Job enablement.
 4. After fixing registration/imports, run the normal Nautobot upgrade/sync
    workflow and restart web and worker processes.
+
+## Nautobot 3.x IPAddress field compatibility notes
+
+Date: 2026-06-24
+
+### Symptoms
+
+`Evaluate Endpoint Intent` appeared in Nautobot and started, but failed in the
+Job console with:
+
+```text
+django.core.exceptions.FieldError: Cannot resolve keyword 'address' into field.
+Choices are: ... dns_name, host, ... mask_length, ...
+```
+
+### Cause
+
+The endpoint evaluation Job queried Nautobot IP addresses with:
+
+```python
+IPAddress.objects.all().order_by("address")
+```
+
+In the observed Nautobot 3.1.3 environment, `IPAddress` does not expose
+`address` as an ORM field. The model stores the address parts as fields such as
+`host` and `mask_length`. Code may still need to support older test doubles or
+older Nautobot-style objects that expose an `address` attribute, but ORM queries
+must use concrete model fields for the deployed Nautobot version.
+
+The same assumption also existed in deterministic endpoint evaluation helpers:
+they read `actual_ip.address` when building observed facts and matching desired
+endpoint IPs to actual `IPAddress` candidates. That path did not always crash
+because it used `getattr()`, but it could silently fail to match Nautobot 3 IP
+objects that only expose `host` and `mask_length`.
+
+### Fix applied here
+
+- Changed the Job candidate query to sort by concrete Nautobot 3 fields:
+
+```python
+IPAddress.objects.all().order_by("host", "mask_length")
+```
+
+- Added an IP display helper that prefers `actual_ip.address` when present and
+  otherwise derives `host/mask_length`.
+- Updated endpoint matching, observed facts, and actual refs to use the helper.
+- Added tests for Nautobot 3-style `IPAddress` objects with `host` and
+  `mask_length`.
+
+### Future checklist
+
+When using Nautobot model fields in ORM calls such as `filter()`, `exclude()`,
+or `order_by()`, verify the exact field names in the target Nautobot version.
+Properties and display helpers are not valid ORM field names.
+
+For cross-version plugin code, keep compatibility helpers at the boundary where
+model objects are converted into app facts. Avoid scattering direct assumptions
+like `IPAddress.address` through evaluation logic.

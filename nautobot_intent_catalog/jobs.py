@@ -357,7 +357,7 @@ else:
             if not include_inactive:
                 endpoints = endpoints.exclude(desired_node__lifecycle__in=("deprecated", "retired"))
 
-            ip_candidates = list(IPAddress.objects.all().order_by("address"))
+            ip_candidates = list(IPAddress.objects.all().order_by("host", "mask_length"))
             counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
             for desired_endpoint in endpoints:
                 desired_node = desired_endpoint.desired_node

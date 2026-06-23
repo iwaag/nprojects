@@ -50,6 +50,42 @@ nautobot-server migrate nautobot_intent_catalog
 If `makemigrations --check --dry-run` reports changes, regenerate the migration
 inside that Nautobot environment and review only the App model differences.
 
+For Job changes, verify discovery inside the same Nautobot environment:
+
+```python
+import nautobot_intent_catalog.jobs as j
+print([job.__name__ for job in j.jobs])
+```
+
+If new Jobs are missing, check imports before UI permissions. Job modules should
+use fully qualified Nautobot imports such as `nautobot.dcim.models`,
+`nautobot.ipam.models`, and `nautobot.virtualization.models`; if Nautobot is
+installed, broken imports should fail loudly instead of falling back to
+`jobs = ()`. Register app Jobs with `register_jobs(*jobs)`, then run the normal
+Nautobot upgrade/sync workflow and restart both web and worker processes.
+
+## Nautobot UI Compatibility
+
+When adding object views for app models, either create the expected
+`{app_label}/{model_name}.html` template or set `template_name` explicitly.
+Generic `ObjectView` redirects can otherwise fail after a successful database
+write because the default detail template is missing.
+
+On Nautobot 3.1.x, `ButtonsColumn` includes a changelog action by default. If a
+model does not provide a changelog URL/view, pass an explicit button set such as
+`buttons=("edit", "delete")`. Also check related `tables.LinkColumn()` fields:
+linked models need working `get_absolute_url()` targets and detail templates.
+
+## Nautobot Model Compatibility
+
+Do not assume display properties are ORM fields. For example, Nautobot 3.1.x
+`IPAddress` uses concrete fields such as `host` and `mask_length`, so ORM calls
+should order or filter on those fields instead of `address`.
+
+Keep cross-version object conversion at the boundary where Nautobot models are
+turned into app facts. Prefer small compatibility helpers there over scattering
+direct assumptions such as `IPAddress.address` through evaluation logic.
+
 ## Rename Cleanup Checks
 
 Before completing a rename-oriented step, run searches for old implementation

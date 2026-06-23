@@ -540,10 +540,11 @@ def _actual_node_facts(object_type: str, actual: Any) -> dict[str, Any]:
 
 
 def _actual_ip_facts(actual_ip: Any) -> dict[str, Any]:
+    address = _ip_address_display(actual_ip)
     return {
         "object_type": "ipam.ipaddress",
         "id": _pk(actual_ip),
-        "address": _text(getattr(actual_ip, "address", None)),
+        "address": address,
         "dns_name": _text(getattr(actual_ip, "dns_name", None)),
     }
 
@@ -569,7 +570,7 @@ def _matching_ip_candidates(ip_address: Any, ip_candidates: Iterable[Any]) -> li
         return []
     matches = []
     for actual in ip_candidates:
-        actual_host = _host_address(getattr(actual, "address", None))
+        actual_host = _host_address(_ip_address_display(actual))
         if expected == actual_host:
             matches.append({"actual_ref": _actual_ref("ipam.ipaddress", actual), "facts": _actual_ip_facts(actual)})
     matches.sort(key=lambda match: match["actual_ref"]["name"])
@@ -656,7 +657,7 @@ def _actual_ref(object_type: str, obj: Any) -> dict[str, Any]:
     return {
         "object_type": object_type,
         "id": _pk(obj),
-        "name": _text(getattr(obj, "name", None) or getattr(obj, "address", None)),
+        "name": _text(getattr(obj, "name", None) or _object_display_name(object_type, obj)),
     }
 
 
@@ -693,6 +694,24 @@ def _host_address(value: Any) -> str:
         return str(ip_interface(text).ip)
     except ValueError:
         return text.split("/", maxsplit=1)[0]
+
+
+def _object_display_name(object_type: str, obj: Any) -> str:
+    if object_type == "ipam.ipaddress":
+        return _ip_address_display(obj)
+    return _text(getattr(obj, "address", None))
+
+
+def _ip_address_display(actual_ip: Any) -> str:
+    address = _text(getattr(actual_ip, "address", None))
+    if address:
+        return address
+
+    host = _text(getattr(actual_ip, "host", None))
+    mask_length = _text(getattr(actual_ip, "mask_length", None))
+    if host and mask_length:
+        return f"{host}/{mask_length}"
+    return host
 
 
 def _normalize_mac(value: Any) -> str:
