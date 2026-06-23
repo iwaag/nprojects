@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .analysis import analyze_intent_sources
 from .dnsmasq import export_dnsmasq_records, render_dnsmasq_export_json, render_dnsmasq_records_conf
+from .evaluations import ENDPOINT_TARGET_TYPE, NODE_TARGET_TYPE, evaluate_endpoint_intent, evaluate_node_intent
 from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
@@ -23,9 +24,12 @@ from .loaders import load_default_intent_sources, load_intent_sources
 try:
     from django.conf import settings
     from django.utils import timezone
+    from dcim.models import Device
+    from ipam.models import IPAddress
     from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar, register_jobs
+    from virtualization.models import VirtualMachine
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
+    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
     jobs = ()
 else:
@@ -285,6 +289,87 @@ else:
 
             self.logger.info("Desired service import summary: %s", _json(counts))
 
+
+    class EvaluateNodeIntent(Job):
+        """Evaluate desired nodes against actual Nautobot Device/VM objects."""
+
+        include_inactive = BooleanVar(
+            default=False,
+            description="Include deprecated and retired DesiredNode rows.",
+        )
+
+        class Meta:
+            name = "Evaluate Node Intent"
+            description = "Persist deterministic DesiredNode evaluations against actual Device and VirtualMachine rows."
+            has_sensitive_variables = False
+
+        def run(self, include_inactive: bool) -> None:
+            nodes = DesiredNode.objects.select_related("realized_device", "realized_vm").order_by("slug")
+            if not include_inactive:
+                nodes = nodes.exclude(lifecycle__in=("deprecated", "retired"))
+
+            device_candidates = list(Device.objects.all().order_by("name"))
+            vm_candidates = list(VirtualMachine.objects.all().order_by("name"))
+            counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
+            for desired_node in nodes:
+                payload = evaluate_node_intent(
+                    desired_node,
+                    device_candidates=device_candidates,
+                    vm_candidates=vm_candidates,
+                )
+                created = _upsert_evaluation(payload)
+                counts["evaluated"] += 1
+                counts["created" if created else "updated"] += 1
+                counts["statuses"][payload.status] = counts["statuses"].get(payload.status, 0) + 1
+
+            self.logger.info("Desired node evaluation summary: %s", _json(counts))
+
+
+    class EvaluateEndpointIntent(Job):
+        """Evaluate desired endpoints against actual Nautobot IP and interface facts."""
+
+        include_inactive = BooleanVar(
+            default=False,
+            description="Include endpoints attached to deprecated and retired DesiredNode rows.",
+        )
+
+        class Meta:
+            name = "Evaluate Endpoint Intent"
+            description = "Persist deterministic DesiredEndpoint evaluations against actual IPAddress and interface facts."
+            has_sensitive_variables = False
+
+        def run(self, include_inactive: bool) -> None:
+            endpoints = DesiredEndpoint.objects.select_related(
+                "desired_node",
+                "desired_node__realized_device",
+                "desired_node__realized_vm",
+                "realized_ip_address",
+            ).order_by("desired_node__slug", "endpoint_type", "name")
+            if not include_inactive:
+                endpoints = endpoints.exclude(desired_node__lifecycle__in=("deprecated", "retired"))
+
+            ip_candidates = list(IPAddress.objects.all().order_by("address"))
+            counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
+            for desired_endpoint in endpoints:
+                desired_node = desired_endpoint.desired_node
+                node_payload = evaluate_node_intent(
+                    desired_node,
+                    device_candidates=(),
+                    vm_candidates=(),
+                )
+                payload = evaluate_endpoint_intent(
+                    desired_endpoint,
+                    ip_candidates=ip_candidates,
+                    node_evaluation=node_payload,
+                )
+                created = _upsert_evaluation(payload)
+                counts["evaluated"] += 1
+                counts["created" if created else "updated"] += 1
+                counts["statuses"][payload.status] = counts["statuses"].get(payload.status, 0) + 1
+
+            self.logger.info("Desired endpoint evaluation summary: %s", _json(counts))
+
+
     class ExportDnsmasqRecords(Job):
         """Dry-run export desired endpoint dnsmasq records."""
 
@@ -304,7 +389,13 @@ else:
                 "endpoint_type",
                 "name",
             )
-            export = export_dnsmasq_records(endpoints, include_skipped=include_skipped)
+            endpoint_list = list(endpoints)
+            export = export_dnsmasq_records(
+                endpoint_list,
+                endpoint_evaluations=_latest_evaluations(ENDPOINT_TARGET_TYPE),
+                node_evaluations=_latest_evaluations(NODE_TARGET_TYPE),
+                include_skipped=include_skipped,
+            )
             generated_at = timezone.now().isoformat()
             job_result_id = str(getattr(self.job_result, "id", "")) or None
             self.create_file(
@@ -316,11 +407,28 @@ else:
                 render_dnsmasq_export_json(export, generated_at=generated_at, job_result_id=job_result_id),
             )
             self.logger.info("dnsmasq export summary: %s", _json(export.summary))
+            self.logger.info(
+                "dnsmasq export counts: %s",
+                _json(
+                    {
+                        "dns_records": len(export.dns_records),
+                        "dhcp_reservations": len(export.dhcp_reservations),
+                        "skipped_details": len(export.skipped),
+                    }
+                ),
+            )
             self.logger.info("dnsmasq export files: dnsmasq-records.conf, dnsmasq-export.json")
             if include_skipped:
                 self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
 
-    jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources, ExportDnsmasqRecords)
+    jobs = (
+        PreviewIntentSourceAnalysis,
+        ImportIntentSources,
+        AnalyzeIntentSources,
+        EvaluateNodeIntent,
+        EvaluateEndpointIntent,
+        ExportDnsmasqRecords,
+    )
     register_jobs(*jobs)
 
 
@@ -332,6 +440,27 @@ def _configured_source_file():
 
 def _json(value) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=True)
+
+
+def _upsert_evaluation(payload) -> bool:
+    _, created = IntentEvaluation.objects.update_or_create(
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        source_hash=payload.source_hash,
+        defaults={
+            **payload.as_defaults(),
+            "reviewed_at": timezone.now(),
+        },
+    )
+    return created
+
+
+def _latest_evaluations(target_type: str) -> dict:
+    evaluations = {}
+    rows = IntentEvaluation.objects.filter(target_type=target_type).order_by("target_id", "-reviewed_at", "-created")
+    for evaluation in rows:
+        evaluations.setdefault(str(evaluation.target_id), evaluation)
+    return evaluations
 
 
 def _entry_from_intent_source(intent_source) -> IntentSourceEntry:

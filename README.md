@@ -2,8 +2,8 @@
 
 Nautobot App for importing and analyzing cluster intent. The current code
 supports intent sources, desired services, desired dependencies, desired nodes,
-desired endpoints, and deterministic dnsmasq export. Planned work will add
-evaluation jobs and remediation review.
+desired endpoints, deterministic desired-vs-actual evaluations, and dnsmasq
+DNS/DHCP export. Planned work will add remediation review.
 
 ## Install
 
@@ -61,11 +61,13 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
 - Provides `Quick Host Add` for creating one desired node and one primary endpoint from one Nautobot form.
 - Persists `IntentEvaluation` rows for desired-vs-actual gap data.
-- Exports deterministic dnsmasq records from eligible desired endpoints.
+- Evaluates desired nodes and endpoints against Nautobot actual objects.
+- Exports deterministic dnsmasq DNS records and DHCP reservations from eligible
+  desired endpoints.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
 - Provides dry-run and import Nautobot Jobs for intent source analysis.
 - Detects Backstage `Component` catalog entries for `service`, `website`, and `worker` desired services.
-- Does not run automated gap evaluation or remediation review yet.
+- Does not run remediation review yet.
 
 For the model intent and design boundaries behind `IntentSource`,
 `DesiredService`, `DesiredDependency`, `DesiredNode`, `DesiredEndpoint`, and
@@ -151,12 +153,13 @@ Run the `Export dnsmasq Records` Job to create deterministic JobResult output
 files for automation:
 
 - `dnsmasq-records.conf`: dnsmasq-ready configuration lines.
-- `dnsmasq-export.json`: machine-readable export metadata, records, and skipped
-  endpoint details for Ansible, audit, and troubleshooting.
+- `dnsmasq-export.json`: machine-readable export metadata, `dns_records`,
+  `dhcp_reservations`, and skipped endpoint details for Ansible, audit, and
+  troubleshooting.
 
 The Python API is `nautobot_intent_catalog.dnsmasq.export_dnsmasq_records()`;
-it returns a dictionary-friendly structure with `summary`, `records`, and
-`skipped` entries.
+it returns a dictionary-friendly structure with `summary`, `dns_records`,
+`dhcp_reservations`, and `skipped` entries.
 
 Initial export selection requires:
 
@@ -173,6 +176,28 @@ Supported `dnsmasq_record_type` values are:
 
 `cname` records require `vpn_dns_name` as the alias target. `mdns_name` is kept
 as endpoint metadata and is intentionally not exported as a dnsmasq record.
+
+DHCP reservations use the same endpoint selection criteria plus deterministic
+actual-state requirements from the latest `Evaluate Endpoint Intent` and
+`Evaluate Node Intent` results:
+
+- the related desired node has exactly one actual node match
+- the endpoint evaluation has exactly one DHCP MAC candidate
+- the MAC address is valid and normalized to lower-case colon format
+
+When these conditions are met, `dnsmasq-records.conf` includes:
+
+```text
+dhcp-host=<mac>,<dns_name>,<ip>
+```
+
+`ip_address` values with CIDR suffixes are normalized to host addresses for both
+DNS records and DHCP reservations. DNS records are still exported when DHCP is
+skipped; missing actual nodes, missing MACs, ambiguous interfaces, invalid MACs,
+and inactive lifecycles are reported in `dnsmasq-export.json` under `skipped`.
+Ansible and other deployment automation should only place the generated
+artifact, for example at `/etc/dnsmasq.d/nintent-records.conf`; MAC inference
+and desired-vs-actual comparison belong to Nautobot evaluation jobs.
 
 ## Intent Evaluations
 
@@ -195,6 +220,28 @@ Structured deterministic fields are kept separate from optional AI review:
 
 `ai_review` may be empty. Deterministic evaluations and recommended actions are
 valid without any model-generated review.
+
+Run `Evaluate Node Intent` to compare `DesiredNode` rows with actual Nautobot
+`Device` and `VirtualMachine` rows. Explicit `realized_device` or `realized_vm`
+links are authoritative and are evaluated before candidate discovery. Unlinked
+nodes are matched deterministically by hostname/name, serial or UUID, and
+platform or OS hints from `expected_spec` and actual object fields/custom
+fields. Ambiguous matches are not adopted automatically; they are stored as
+`conflict` evaluations with review-required actions.
+
+Run `Evaluate Endpoint Intent` to compare `DesiredEndpoint` rows with
+`IPAddress` rows and interface facts from the related realized node. It records
+IP address mismatches as `conflict`, missing or unlinked IP addresses as
+`partial`, and DHCP MAC candidates in `observed_facts`. Endpoints with no MAC
+or multiple MAC-bearing interfaces are not considered DHCP-reservation-ready.
+`Export dnsmasq Records` consumes these deterministic facts to emit `dhcp-host=`
+lines only when the reservation is unambiguous.
+
+Initial recommended action examples:
+
+- `link_desired_node_to_actual`
+- `create_or_link_ip_address`
+- `select_dhcp_interface`
 
 For local checks that do not require Nautobot:
 

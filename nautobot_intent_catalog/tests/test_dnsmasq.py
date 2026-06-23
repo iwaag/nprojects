@@ -8,11 +8,12 @@ from nautobot_intent_catalog.dnsmasq import (
     export_dnsmasq_records,
     render_dnsmasq_export_json,
     render_dnsmasq_records_conf,
+    resolve_dhcp_reservation,
 )
 
 
 def node(name: str, slug: str, lifecycle: str):
-    return SimpleNamespace(name=name, slug=slug, lifecycle=lifecycle)
+    return SimpleNamespace(pk=f"node-{slug}", name=name, slug=slug, lifecycle=lifecycle)
 
 
 def endpoint(
@@ -28,6 +29,7 @@ def endpoint(
     vpn_dns_name: str | None = None,
 ):
     return SimpleNamespace(
+        pk=f"endpoint-{name}",
         name=name,
         desired_node=desired_node,
         endpoint_type=endpoint_type,
@@ -38,6 +40,28 @@ def endpoint(
         generate_dnsmasq=generate_dnsmasq,
         dnsmasq_record_type=dnsmasq_record_type,
     )
+
+
+def endpoint_evaluation(endpoint_obj, *, mac_candidates=None, ready=True):
+    return {
+        str(endpoint_obj.pk): {
+            "deterministic_summary": {"dhcp_reservation_ready": ready},
+            "observed_facts": {"dhcp_mac_candidates": mac_candidates or []},
+        }
+    }
+
+
+def mac_candidate(*, mac_address="AA-BB-CC-DD-EE-FF", node_name="Edge 1", node_id="actual-node-1", interface_name="eth0"):
+    return {
+        "actual_node_ref": {
+            "object_type": "dcim.device",
+            "id": node_id,
+            "name": node_name,
+        },
+        "interface_id": f"interface-{interface_name}",
+        "interface_name": interface_name,
+        "mac_address": mac_address,
+    }
 
 
 class DnsmasqExportTests(unittest.TestCase):
@@ -54,15 +78,25 @@ class DnsmasqExportTests(unittest.TestCase):
 
         export = export_dnsmasq_records(endpoints)
 
-        self.assertEqual(export.summary["eligible_endpoints"], 1)
-        self.assertEqual(export.summary["skipped_endpoints"], 4)
-        self.assertEqual(export.records[0]["line"], "host-record=edge-1.example.test,192.0.2.10")
-        self.assertEqual(export.records[0]["mdns_name"], "edge-1.local")
-        skipped_reasons = {entry["endpoint_name"]: entry["reasons"] for entry in export.skipped}
-        self.assertEqual(skipped_reasons["off"], ["generate_dnsmasq_false"])
-        self.assertEqual(skipped_reasons["mdns"], ["endpoint_type_not_exportable"])
-        self.assertEqual(skipped_reasons["old"], ["node_lifecycle_not_exportable"])
-        self.assertEqual(skipped_reasons["nameless"], ["missing_dns_name"])
+        self.assertEqual(export.summary["dns_records"], 1)
+        self.assertEqual(export.summary["skipped"]["dns_records"], 4)
+        self.assertEqual(export.dns_records[0]["line"], "host-record=edge-1.example.test,192.0.2.10")
+        self.assertEqual(export.dns_records[0]["mdns_name"], "edge-1.local")
+        skipped_reasons = {
+            (entry["item_type"], entry["endpoint_name"]): entry["reasons"]
+            for entry in export.skipped
+            if entry["item_type"] == "dns_record"
+        }
+        self.assertEqual(skipped_reasons[("dns_record", "off")], ["generate_dnsmasq_false"])
+        self.assertEqual(skipped_reasons[("dns_record", "mdns")], ["endpoint_type_not_exportable"])
+        self.assertEqual(skipped_reasons[("dns_record", "old")], ["node_lifecycle_not_exportable"])
+        self.assertEqual(skipped_reasons[("dns_record", "nameless")], ["missing_dns_name"])
+        dhcp_skipped_reasons = {
+            entry["endpoint_name"]: entry["reasons"]
+            for entry in export.skipped
+            if entry["item_type"] == "dhcp_reservation"
+        }
+        self.assertIn("node_lifecycle_not_exportable", dhcp_skipped_reasons["old"])
 
     def test_export_formats_record_types_and_sort_order(self) -> None:
         approved = node("App 1", "app-1", "approved")
@@ -98,10 +132,10 @@ class DnsmasqExportTests(unittest.TestCase):
 
         self.assertEqual(export.skipped, [])
         self.assertEqual(export.summary["total_endpoints"], 3)
-        self.assertEqual(export.summary["skipped_endpoints"], 0)
+        self.assertEqual(export.summary["skipped"]["dns_records"], 0)
         self.assertEqual(export.summary["skipped_endpoint_details"], 0)
         self.assertEqual(
-            [record["line"] for record in export.records],
+            [record["line"] for record in export.dns_records],
             [
                 "address=/api.example.test/198.51.100.20",
                 "host-record=app.example.test,198.51.100.30",
@@ -128,20 +162,90 @@ class DnsmasqExportTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(export.records, [])
-        self.assertEqual(export.skipped[0]["reasons"], ["missing_cname_alias"])
+        self.assertEqual(export.dns_records, [])
+        dns_skip = [entry for entry in export.skipped if entry["item_type"] == "dns_record"][0]
+        self.assertEqual(dns_skip["reasons"], ["missing_cname_alias"])
+
+    def test_dns_record_is_exported_without_mac_but_dhcp_is_skipped(self) -> None:
+        active = node("Edge 1", "edge-1", "active")
+        primary = endpoint(
+            name="primary",
+            desired_node=active,
+            dns_name="edge-1.example.test",
+            ip_address="192.0.2.10/32",
+        )
+
+        export = export_dnsmasq_records([primary])
+
+        self.assertEqual(export.dns_records[0]["line"], "host-record=edge-1.example.test,192.0.2.10")
+        self.assertEqual(export.dhcp_reservations, [])
+        dhcp_skip = [entry for entry in export.skipped if entry["item_type"] == "dhcp_reservation"][0]
+        self.assertIn("missing_endpoint_evaluation", dhcp_skip["reasons"])
+        self.assertIn("missing_actual_node", dhcp_skip["reasons"])
+        self.assertIn("missing_mac_address", dhcp_skip["reasons"])
+
+    def test_dhcp_reservation_is_exported_when_mac_is_unique(self) -> None:
+        active = node("Edge 1", "edge-1", "active")
+        primary = endpoint(
+            name="primary",
+            desired_node=active,
+            dns_name="edge-1.example.test",
+            ip_address="192.0.2.10/32",
+        )
+        export = export_dnsmasq_records(
+            [primary],
+            endpoint_evaluations=endpoint_evaluation(primary, mac_candidates=[mac_candidate()]),
+        )
+
+        self.assertEqual(export.summary["dhcp_reservations"], 1)
+        self.assertEqual(
+            export.dhcp_reservations[0]["line"],
+            "dhcp-host=aa:bb:cc:dd:ee:ff,edge-1.example.test,192.0.2.10",
+        )
+
+    def test_dhcp_reservation_skips_ambiguous_or_invalid_mac(self) -> None:
+        active = node("Edge 1", "edge-1", "active")
+        primary = endpoint(
+            name="primary",
+            desired_node=active,
+            dns_name="edge-1.example.test",
+            ip_address="192.0.2.10/32",
+        )
+
+        ambiguous = resolve_dhcp_reservation(
+            primary,
+            endpoint_evaluation={
+                "deterministic_summary": {"dhcp_reservation_ready": False},
+                "observed_facts": {
+                    "dhcp_mac_candidates": [
+                        mac_candidate(mac_address="aa:bb:cc:dd:ee:ff", interface_name="eth0"),
+                        mac_candidate(mac_address="11:22:33:44:55:66", interface_name="eth1"),
+                    ]
+                },
+            },
+        )
+        invalid = resolve_dhcp_reservation(
+            primary,
+            endpoint_evaluation={
+                "deterministic_summary": {"dhcp_reservation_ready": True},
+                "observed_facts": {"dhcp_mac_candidates": [mac_candidate(mac_address="not-a-mac")]},
+            },
+        )
+
+        self.assertIn("ambiguous_interface", ambiguous["skip_reasons"])
+        self.assertIn("invalid_mac_address", invalid["skip_reasons"])
 
     def test_render_outputs_for_ansible_consumption(self) -> None:
         active = node("Edge 1", "edge-1", "active")
+        primary = endpoint(
+            name="primary",
+            desired_node=active,
+            dns_name="edge-1.example.test",
+            ip_address="192.0.2.10/32",
+        )
         export = export_dnsmasq_records(
-            [
-                endpoint(
-                    name="primary",
-                    desired_node=active,
-                    dns_name="edge-1.example.test",
-                    ip_address="192.0.2.10/32",
-                )
-            ]
+            [primary],
+            endpoint_evaluations=endpoint_evaluation(primary, mac_candidates=[mac_candidate()]),
         )
 
         conf = render_dnsmasq_records_conf(
@@ -154,10 +258,11 @@ class DnsmasqExportTests(unittest.TestCase):
             "\n".join(
                 [
                     "# Generated by Nautobot Intent Catalog",
-                    "# schema_version: 1.0",
+                    "# schema_version: 2.0",
                     "# generated_at: 2026-06-23T00:00:00+00:00",
                     "# job_result_id: job-123",
                     "host-record=edge-1.example.test,192.0.2.10",
+                    "dhcp-host=aa:bb:cc:dd:ee:ff,edge-1.example.test,192.0.2.10",
                     "",
                 ]
             ),
@@ -168,9 +273,13 @@ class DnsmasqExportTests(unittest.TestCase):
             generated_at="2026-06-23T00:00:00+00:00",
             job_result_id="job-123",
         )
-        self.assertEqual(payload["schema_version"], "1.0")
+        self.assertEqual(payload["schema_version"], "2.0")
         self.assertEqual(payload["job_result_id"], "job-123")
-        self.assertEqual(payload["records"][0]["line"], "host-record=edge-1.example.test,192.0.2.10")
+        self.assertEqual(payload["dns_records"][0]["line"], "host-record=edge-1.example.test,192.0.2.10")
+        self.assertEqual(
+            payload["dhcp_reservations"][0]["line"],
+            "dhcp-host=aa:bb:cc:dd:ee:ff,edge-1.example.test,192.0.2.10",
+        )
         self.assertTrue(render_dnsmasq_export_json(export, generated_at="2026-06-23T00:00:00+00:00").endswith("\n"))
 
 
