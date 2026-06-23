@@ -23,7 +23,7 @@ from .loaders import load_default_intent_sources, load_intent_sources
 try:
     from django.conf import settings
     from django.utils import timezone
-    from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar
+    from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar, register_jobs
 
     from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentSource
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
@@ -311,6 +311,7 @@ else:
                 self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
 
     jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources, ExportDnsmasqRecords)
+    register_jobs(*jobs)
 
 
 def _configured_source_file():
