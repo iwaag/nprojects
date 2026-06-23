@@ -116,6 +116,29 @@ desired_endpoints:
     dnsmasq_record_type: host_record
 ```
 
+For the common one-host/one-primary-endpoint case, YAML may omit `dns_name` and
+`mdns_name` on a primary endpoint. During import, missing or blank values are
+filled from the resolved desired node name:
+
+```yaml
+desired_nodes:
+  - name: pcmain
+    slug: pcmain
+    node_type: device
+    lifecycle: active
+
+desired_endpoints:
+  - name: primary
+    desired_node: pcmain
+    endpoint_type: primary
+    ip_address: 192.168.10.25/24
+    generate_dnsmasq: true
+```
+
+This imports the endpoint with `dns_name: pcmain.home.arpa` and
+`mdns_name: pcmain.local`. Explicit YAML values are preserved. Non-primary
+endpoints are not auto-filled.
+
 Manual conversion from an older YAML shape is intentionally mechanical: rename
 the top-level list key to `intent_sources` and keep each item field that still
 applies. Fields such as `catalog_paths`, `basic_file_paths`, and
@@ -142,6 +165,16 @@ canonical records used everywhere else:
 
 - one `DesiredNode`
 - one primary `DesiredEndpoint`
+
+If DNS or mDNS fields are left blank, Quick Host Add fills soft defaults from
+the canonical node name. For a node named `pcmain`, the primary endpoint gets:
+
+- `dns_name: pcmain.home.arpa`
+- `mdns_name: pcmain.local`
+
+Names such as `PCMAIN.local` and `pcmain.home.arpa` canonicalize to `pcmain`
+for default generation. Explicit `dns_name` and `mdns_name` form values are
+never overwritten.
 
 Use the normal `DesiredNode` and `DesiredEndpoint` CRUD screens when a host
 needs multiple endpoints, non-primary endpoint types, realized object links, or
@@ -200,6 +233,18 @@ Ansible and other deployment automation should only place the generated
 artifact, for example at `/etc/dnsmasq.d/nintent-records.conf`; MAC inference
 and desired-vs-actual comparison belong to Nautobot evaluation jobs.
 
+Run the jobs in this order when DHCP reservations depend on discovered actual
+node/interface facts:
+
+1. `Evaluate Node Intent`
+2. `Evaluate Endpoint Intent`
+3. `Export dnsmasq Records`
+
+The endpoint evaluation consumes the latest stored node evaluation. This allows
+an actual node discovered by normalized name matching, such as desired `pcmain`
+to actual `pcmain.local`, to provide interface and MAC candidates for DHCP
+reservation export.
+
 ## Intent Evaluations
 
 `IntentEvaluation` stores durable desired-vs-actual review data for UI, API,
@@ -235,16 +280,20 @@ Run `Evaluate Node Intent` to compare `DesiredNode` rows with actual Nautobot
 links are authoritative and are evaluated before candidate discovery. Unlinked
 nodes are matched deterministically by hostname/name, serial or UUID, and
 platform or OS hints from `expected_spec` and actual object fields/custom
-fields. Ambiguous matches are not adopted automatically; they are stored as
-`conflict` evaluations with review-required actions.
+fields. Built-in home-lab suffixes are normalized for name comparison, so
+`pcmain` and `pcmain.local` are treated as the same node identity while
+unrelated FQDNs such as `db01.prod.example.com` are not collapsed to `db01`.
+Ambiguous matches are not adopted automatically; they are stored as `conflict`
+evaluations with review-required actions.
 
 Run `Evaluate Endpoint Intent` to compare `DesiredEndpoint` rows with
-`IPAddress` rows and interface facts from the related realized node. It records
-IP address mismatches as `conflict`, missing or unlinked IP addresses as
-`partial`, and DHCP MAC candidates in `observed_facts`. Endpoints with no MAC
-or multiple MAC-bearing interfaces are not considered DHCP-reservation-ready.
-`Export dnsmasq Records` consumes these deterministic facts to emit `dhcp-host=`
-lines only when the reservation is unambiguous.
+`IPAddress` rows and interface facts from the related realized node or the
+latest stored node evaluation. It records IP address mismatches as `conflict`,
+missing or unlinked IP addresses as `partial`, and DHCP MAC candidates in
+`observed_facts`. Endpoints with no MAC or multiple MAC-bearing interfaces are
+not considered DHCP-reservation-ready. `Export dnsmasq Records` consumes these
+deterministic facts to emit `dhcp-host=` lines only when the reservation is
+unambiguous.
 
 Initial recommended action examples:
 

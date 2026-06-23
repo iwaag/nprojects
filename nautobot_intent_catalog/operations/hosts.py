@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from nautobot_intent_catalog.names import default_dns_name, default_mdns_name
+
 try:
     from django.core.exceptions import ValidationError
     from django.db import IntegrityError, transaction
@@ -75,6 +77,11 @@ def create_desired_node_with_primary_endpoint(
         "endpoint_name": _required_str(endpoint_name, "endpoint_name"),
         "endpoint_type": _required_str(endpoint_type, "endpoint_type"),
     }
+    if cleaned["endpoint_name"] == "primary" and cleaned["endpoint_type"] == "primary":
+        if cleaned["dns_name"] is None:
+            cleaned["dns_name"] = default_dns_name(cleaned["name"])
+        if cleaned["mdns_name"] is None:
+            cleaned["mdns_name"] = default_mdns_name(cleaned["name"])
 
     _validate_node_identity(name=cleaned["name"], slug=cleaned["slug"])
 

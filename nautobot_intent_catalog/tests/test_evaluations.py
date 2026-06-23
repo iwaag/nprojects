@@ -152,6 +152,16 @@ class NodeEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "actual_node_not_linked")
         self.assertTrue(payload.recommended_actions[0]["requires_review"])
 
+    def test_name_normalized_candidate_is_partial_and_requires_review(self) -> None:
+        payload = evaluate_node_intent(
+            node(name="pc1", slug="pc1"),
+            device_candidates=[actual_node(name="pc1.local")],
+        )
+
+        self.assertEqual(payload.status, "partial")
+        self.assertEqual(payload.actual_refs[0]["name"], "pc1.local")
+        self.assertEqual(payload.observed_facts["candidates"][0]["match_reasons"], ["name_or_hostname"])
+
     def test_explicit_link_mismatch_is_conflict(self) -> None:
         payload = evaluate_node_intent(
             node(realized_device=actual_node(serial="ACTUAL"), expected_spec={"serial": "EXPECTED"})
@@ -159,6 +169,27 @@ class NodeEvaluationTests(unittest.TestCase):
 
         self.assertEqual(payload.status, "conflict")
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "serial_mismatch")
+
+    def test_name_normalized_explicit_hostname_link_is_not_conflict(self) -> None:
+        payload = evaluate_node_intent(
+            node(
+                name="pc1",
+                realized_device=actual_node(name="pc1.local"),
+                expected_spec={"hostname": "pc1"},
+            )
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertEqual(payload.gap_summary["gaps"], [])
+
+    def test_unrelated_fqdn_candidate_is_not_collapsed_to_short_name(self) -> None:
+        payload = evaluate_node_intent(
+            node(name="db01", slug="db01"),
+            device_candidates=[actual_node(name="db01.prod.example.com")],
+        )
+
+        self.assertEqual(payload.status, "missing")
+        self.assertEqual(payload.observed_facts["candidates"], [])
 
     def test_ambiguous_candidates_are_conflict(self) -> None:
         desired = node(expected_spec={"serial": "SER123"})
@@ -245,6 +276,61 @@ class EndpointEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "ambiguous_interface")
         self.assertFalse(payload.deterministic_summary["dhcp_reservation_ready"])
         self.assertEqual(payload.recommended_actions[0]["action"], "select_dhcp_interface")
+
+    def test_node_evaluation_candidate_interfaces_supply_mac_candidates(self) -> None:
+        desired_node = node(name="pc1", slug="pc1")
+        node_payload = evaluate_node_intent(
+            desired_node,
+            device_candidates=[
+                actual_node(
+                    name="pc1.local",
+                    interfaces=[interface(name="eth0", mac_address="aa-bb-cc-dd-ee-ff")],
+                )
+            ],
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            node_evaluation=node_payload,
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["dhcp_mac_candidates"][0]["mac_address"], "aa:bb:cc:dd:ee:ff")
+        self.assertEqual(
+            payload.observed_facts["dhcp_mac_candidates"][0]["actual_node_ref"]["name"],
+            "pc1.local",
+        )
+
+    def test_stored_node_evaluation_object_interfaces_supply_mac_candidates(self) -> None:
+        stored_node_evaluation = obj(
+            observed_facts={
+                "actual": {
+                    "interfaces": [
+                        {
+                            "actual_node_ref": {
+                                "object_type": "dcim.device",
+                                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                                "name": "pc1.local",
+                            },
+                            "interface_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                            "interface_name": "eth0",
+                            "mac_address": "aa:bb:cc:dd:ee:ff",
+                            "enabled": True,
+                        }
+                    ]
+                }
+            }
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=node(name="pc1", slug="pc1"), realized_ip_address=actual_ip()),
+            node_evaluation=stored_node_evaluation,
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["interface_candidates"][0]["interface_name"], "eth0")
 
 
 class ServiceEvaluationTests(unittest.TestCase):

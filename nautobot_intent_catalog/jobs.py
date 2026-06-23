@@ -187,7 +187,7 @@ else:
                 if desired_node is None:
                     raise ValueError(f"Desired endpoint references missing desired node: {endpoint.desired_node}")
                 identity = desired_endpoint_identity(endpoint, desired_node_id=desired_node.pk)
-                defaults = desired_endpoint_defaults(endpoint)
+                defaults = desired_endpoint_defaults(endpoint, desired_node=desired_node)
                 endpoint_obj, created = DesiredEndpoint.objects.get_or_create(**identity, defaults=defaults)
                 if created:
                     counts["endpoints_created"] += 1
@@ -358,18 +358,14 @@ else:
                 endpoints = endpoints.exclude(desired_node__lifecycle__in=("deprecated", "retired"))
 
             ip_candidates = list(IPAddress.objects.all().order_by("host", "mask_length"))
+            node_evaluations = _latest_evaluations(NODE_TARGET_TYPE)
             counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
             for desired_endpoint in endpoints:
                 desired_node = desired_endpoint.desired_node
-                node_payload = evaluate_node_intent(
-                    desired_node,
-                    device_candidates=(),
-                    vm_candidates=(),
-                )
                 payload = evaluate_endpoint_intent(
                     desired_endpoint,
                     ip_candidates=ip_candidates,
-                    node_evaluation=node_payload,
+                    node_evaluation=node_evaluations.get(str(desired_node.pk)),
                 )
                 created = _upsert_evaluation(payload)
                 counts["evaluated"] += 1

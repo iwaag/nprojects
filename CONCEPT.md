@@ -189,6 +189,12 @@ desired_endpoints:
 For basic host inventory, using one `primary` endpoint per node is enough. More
 endpoints can be added later without changing the node identity.
 
+In the simple primary endpoint path, the app can fill soft DNS and mDNS
+defaults from the desired node name. A node named `pcmain` gets
+`pcmain.home.arpa` as the DNS name and `pcmain.local` as mDNS metadata when
+those fields are left blank. Explicit endpoint names remain authoritative, and
+non-primary endpoints are not rewritten.
+
 The dnsmasq export is generated from eligible `DesiredEndpoint` rows. mDNS names
 are retained as metadata and are not exported as dnsmasq records.
 
@@ -222,6 +228,12 @@ AI-related fields include:
 
 An evaluation can be useful even when `ai_review` is empty.
 
+Node evaluations compare desired nodes with actual Nautobot `Device` and
+`VirtualMachine` rows. Name-like identity checks use conservative home-lab
+normalization, so `pcmain` and `pcmain.local` can match, while unrelated FQDNs
+are preserved. Endpoint evaluations can consume the latest stored node
+evaluation facts to find interface and MAC candidates before dnsmasq export.
+
 ## Current Boundaries
 
 These boundaries are intentional in the current implementation:
@@ -229,13 +241,14 @@ These boundaries are intentional in the current implementation:
 - `DesiredService` and `DesiredNode` are not yet directly linked.
 - `DesiredDependency` rows are stored, but dependency satisfaction is not yet
   automatically evaluated.
-- `DesiredNode` / `DesiredEndpoint` can be imported and exported to dnsmasq, but
-  actual Nautobot object comparison is not yet automated.
-- `IntentEvaluation` has CRUD and schema support, but node, endpoint, and service
-  evaluation jobs are not yet implemented.
+- `DesiredNode` / `DesiredEndpoint` can be imported, evaluated against Nautobot
+  actual objects, and exported to dnsmasq.
+- `IntentEvaluation` has CRUD, schema support, and deterministic node,
+  endpoint, and service evaluation jobs. Optional AI review is not implemented
+  yet.
 - The app does not preserve backward compatibility with the old package name,
   old URLs, old model names, old YAML root names, or old migrations.
 
 This means the app is currently useful as an intent inventory, service/dependency
 catalog, endpoint source for deterministic dnsmasq export, and storage surface
-for evaluations produced manually or by external automation.
+for deterministic evaluations.

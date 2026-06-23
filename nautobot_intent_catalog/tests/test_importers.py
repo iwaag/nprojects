@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import unittest
 
 from nautobot_intent_catalog.importers import (
@@ -171,6 +172,59 @@ class ImporterTests(unittest.TestCase):
                 "description": None,
             },
         )
+
+    def test_primary_desired_endpoint_defaults_missing_names_from_resolved_node(self) -> None:
+        endpoint = DesiredEndpointEntry(
+            name="primary",
+            desired_node="pc1",
+            endpoint_type="primary",
+            dns_name=None,
+            mdns_name=" ",
+        )
+        desired_node = SimpleNamespace(name="PC1.local")
+
+        self.assertEqual(
+            desired_endpoint_defaults(endpoint, desired_node=desired_node),
+            {
+                "ip_address": None,
+                "dns_name": "pc1.home.arpa",
+                "mdns_name": "pc1.local",
+                "vpn_dns_name": None,
+                "protocol": None,
+                "port": None,
+                "generate_dnsmasq": False,
+                "dnsmasq_record_type": "host_record",
+                "description": None,
+            },
+        )
+
+    def test_primary_desired_endpoint_defaults_preserve_explicit_names(self) -> None:
+        endpoint = DesiredEndpointEntry(
+            name="primary",
+            desired_node="pc1",
+            endpoint_type="primary",
+            dns_name="custom.example.test",
+            mdns_name="custom.local",
+        )
+        desired_node = SimpleNamespace(name="PC1.local")
+
+        defaults = desired_endpoint_defaults(endpoint, desired_node=desired_node)
+
+        self.assertEqual(defaults["dns_name"], "custom.example.test")
+        self.assertEqual(defaults["mdns_name"], "custom.local")
+
+    def test_non_primary_desired_endpoint_defaults_do_not_auto_fill_names(self) -> None:
+        endpoint = DesiredEndpointEntry(
+            name="mgmt",
+            desired_node="pc1",
+            endpoint_type="management",
+        )
+        desired_node = SimpleNamespace(name="PC1.local")
+
+        defaults = desired_endpoint_defaults(endpoint, desired_node=desired_node)
+
+        self.assertIsNone(defaults["dns_name"])
+        self.assertIsNone(defaults["mdns_name"])
 
 
 if __name__ == "__main__":

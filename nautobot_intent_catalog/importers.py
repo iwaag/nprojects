@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .loaders import DesiredEndpointEntry, DesiredNodeEntry, IntentSourceEntry
+from .names import default_dns_name, default_mdns_name
 
 
 SOURCE_CONFIG_FIELDS = (
@@ -154,13 +155,22 @@ def desired_endpoint_identity(endpoint: DesiredEndpointEntry, desired_node_id: A
     }
 
 
-def desired_endpoint_defaults(endpoint: DesiredEndpointEntry) -> dict[str, Any]:
+def desired_endpoint_defaults(endpoint: DesiredEndpointEntry, desired_node: Any | None = None) -> dict[str, Any]:
     """Return model defaults for a desired endpoint loader entry."""
+
+    dns_name = _optional_str(endpoint.dns_name)
+    mdns_name = _optional_str(endpoint.mdns_name)
+    if desired_node is not None and endpoint.name == "primary" and endpoint.endpoint_type == "primary":
+        node_name = getattr(desired_node, "name", None)
+        if dns_name is None:
+            dns_name = default_dns_name(node_name)
+        if mdns_name is None:
+            mdns_name = default_mdns_name(node_name)
 
     return {
         "ip_address": endpoint.ip_address,
-        "dns_name": endpoint.dns_name,
-        "mdns_name": endpoint.mdns_name,
+        "dns_name": dns_name,
+        "mdns_name": mdns_name,
         "vpn_dns_name": endpoint.vpn_dns_name,
         "protocol": endpoint.protocol,
         "port": endpoint.port,
@@ -190,9 +200,10 @@ def _list(value: Any) -> list[Any]:
 
 
 def _optional_str(value: Any) -> str | None:
-    if value is None or value == "":
+    if value is None:
         return None
-    return str(value)
+    normalized = str(value).strip()
+    return normalized or None
 
 
 def _service_type(value: Any) -> str:

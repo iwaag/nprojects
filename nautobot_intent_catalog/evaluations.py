@@ -9,6 +9,8 @@ import json
 import re
 from typing import Any, Iterable
 
+from nautobot_intent_catalog.names import canonical_node_name
+
 
 NODE_TARGET_TYPE = "desired_node"
 ENDPOINT_TARGET_TYPE = "desired_endpoint"
@@ -471,12 +473,16 @@ def _rank_node_candidates(
 def _node_candidate_score(expected: dict[str, Any], actual: dict[str, Any]) -> tuple[int, list[str]]:
     score = 0
     reasons = []
-    expected_names = {_norm(expected.get("name")), _norm(expected.get("slug")), _norm(expected.get("hostname"))}
+    expected_names = {
+        canonical_node_name(expected.get("name")),
+        canonical_node_name(expected.get("slug")),
+        canonical_node_name(expected.get("hostname")),
+    }
     actual_names = {
-        _norm(actual.get("name")),
-        _norm(actual.get("hostname")),
-        _norm(actual.get("custom_fields", {}).get("hostname")),
-        _norm(actual.get("custom_fields", {}).get("nodeutils_hostname")),
+        canonical_node_name(actual.get("name")),
+        canonical_node_name(actual.get("hostname")),
+        canonical_node_name(actual.get("custom_fields", {}).get("hostname")),
+        canonical_node_name(actual.get("custom_fields", {}).get("nodeutils_hostname")),
     }
     expected_names.discard("")
     actual_names.discard("")
@@ -506,7 +512,7 @@ def _node_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[d
             )
     expected_hostname = _text(expected.get("hostname"))
     actual_hostname = _first_text(actual.get("hostname"), actual.get("name"))
-    if expected_hostname and actual_hostname and _norm(expected_hostname) != _norm(actual_hostname):
+    if expected_hostname and actual_hostname and canonical_node_name(expected_hostname) != canonical_node_name(actual_hostname):
         gaps.append(
             {
                 "code": "hostname_mismatch",
@@ -591,7 +597,7 @@ def _interface_candidates_for_endpoint(
     if candidates:
         return sorted(candidates, key=_interface_sort_key)
 
-    evaluation_data = node_evaluation.as_defaults() if isinstance(node_evaluation, EvaluationPayload) else node_evaluation
+    evaluation_data = _evaluation_data(node_evaluation)
     if isinstance(evaluation_data, dict):
         observed = _mapping(evaluation_data.get("observed_facts"))
         actual = observed.get("actual")
@@ -732,6 +738,28 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _evaluation_data(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, EvaluationPayload):
+        return value.as_defaults()
+    if isinstance(value, dict):
+        return value
+    return {
+        key: getattr(value, key)
+        for key in (
+            "status",
+            "deterministic_summary",
+            "actual_refs",
+            "observed_facts",
+            "expected_facts",
+            "gap_summary",
+            "recommended_actions",
+        )
+        if hasattr(value, key)
+    }
 
 
 def _first_text(*values: Any) -> str:

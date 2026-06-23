@@ -122,6 +122,7 @@ class HostOperationTests(unittest.TestCase):
             slug="app-vm-1",
             ip_address="192.0.2.10/32",
             dns_name="app-vm-1.example.test",
+            mdns_name="app-vm-1.local",
         )
 
         self.assertIs(result.desired_node, FakeDesiredNode.objects.rows[0])
@@ -133,8 +134,46 @@ class HostOperationTests(unittest.TestCase):
         self.assertEqual(result.desired_endpoint.endpoint_type, "primary")
         self.assertEqual(result.desired_endpoint.ip_address, "192.0.2.10/32")
         self.assertEqual(result.desired_endpoint.dns_name, "app-vm-1.example.test")
+        self.assertEqual(result.desired_endpoint.mdns_name, "app-vm-1.local")
         self.assertTrue(result.desired_endpoint.generate_dnsmasq)
         self.assertEqual(result.desired_endpoint.dnsmasq_record_type, "host_record")
+
+    def test_blank_primary_endpoint_dns_and_mdns_names_are_defaulted(self) -> None:
+        result = hosts.create_desired_node_with_primary_endpoint(
+            name="PC1.local",
+            slug="pc1",
+            dns_name=" ",
+            mdns_name=None,
+        )
+
+        self.assertEqual(result.desired_endpoint.name, "primary")
+        self.assertEqual(result.desired_endpoint.endpoint_type, "primary")
+        self.assertEqual(result.desired_endpoint.dns_name, "pc1.home.arpa")
+        self.assertEqual(result.desired_endpoint.mdns_name, "pc1.local")
+
+    def test_explicit_primary_endpoint_dns_and_mdns_names_are_preserved(self) -> None:
+        result = hosts.create_desired_node_with_primary_endpoint(
+            name="PC1.local",
+            slug="pc1",
+            dns_name="custom.example.test",
+            mdns_name="custom.local",
+        )
+
+        self.assertEqual(result.desired_endpoint.dns_name, "custom.example.test")
+        self.assertEqual(result.desired_endpoint.mdns_name, "custom.local")
+
+    def test_non_primary_endpoint_dns_and_mdns_names_are_not_defaulted(self) -> None:
+        result = hosts.create_desired_node_with_primary_endpoint(
+            name="PC1.local",
+            slug="pc1",
+            endpoint_name="mgmt",
+            endpoint_type="management",
+        )
+
+        self.assertEqual(result.desired_endpoint.name, "mgmt")
+        self.assertEqual(result.desired_endpoint.endpoint_type, "management")
+        self.assertIsNone(result.desired_endpoint.dns_name)
+        self.assertIsNone(result.desired_endpoint.mdns_name)
 
     def test_slug_duplicate_returns_field_validation_error_without_creating_objects(self) -> None:
         existing = FakeDesiredNode(name="Existing", slug="app-vm-1")
