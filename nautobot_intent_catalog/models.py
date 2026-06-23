@@ -136,7 +136,7 @@ else:
                         "catalog_metadata_name",
                         "service_type",
                     ),
-                    name="nic_unique_service_catalog_entity",
+                    name="nic_unique_desired_service_entity",
                 ),
             )
 

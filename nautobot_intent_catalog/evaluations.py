@@ -12,6 +12,7 @@ from typing import Any, Iterable
 
 NODE_TARGET_TYPE = "desired_node"
 ENDPOINT_TARGET_TYPE = "desired_endpoint"
+SERVICE_TARGET_TYPE = "desired_service"
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,97 @@ def evaluate_endpoint_intent(
     )
 
 
+def evaluate_service_intent(
+    desired_service: Any,
+    *,
+    dependencies: Iterable[Any] | None = None,
+    observed_facts: dict[str, Any] | None = None,
+    ai_review_enabled: bool = False,
+) -> EvaluationPayload:
+    """Evaluate a DesiredService-like object without invoking AI review."""
+
+    dependency_rows = _service_dependencies(desired_service, dependencies)
+    expected = _expected_service_facts(desired_service, dependency_rows)
+    observed = {
+        "service_observation_status": "provided" if observed_facts is not None else "unknown",
+        "service_facts": _mapping(observed_facts),
+        "ai_review": {
+            "enabled": bool(ai_review_enabled),
+            "executed": False,
+        },
+    }
+    actual_refs: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+
+    lifecycle = expected.get("lifecycle")
+    if lifecycle in {"deprecated", "retired"}:
+        gaps.append(
+            {
+                "code": "service_lifecycle_inactive",
+                "severity": "needs_review",
+                "lifecycle": lifecycle,
+            }
+        )
+        actions.append(
+            {
+                "action": "review_service_lifecycle",
+                "target": _target_ref(desired_service),
+                "reason": "The desired service lifecycle is inactive.",
+                "requires_review": True,
+            }
+        )
+    elif lifecycle in {"", "unknown"}:
+        gaps.append({"code": "missing_service_lifecycle", "severity": "unknown"})
+
+    for dependency in expected["dependencies"]:
+        if dependency["resolution_status"] != "unresolved":
+            continue
+        gaps.append(
+            {
+                "code": "unresolved_dependency",
+                "severity": "partial",
+                "dependency": dependency,
+            }
+        )
+        actions.append(
+            {
+                "action": "resolve_service_dependency",
+                "target": _target_ref(desired_service),
+                "dependency": dependency,
+                "reason": "A desired service dependency is unresolved.",
+                "requires_review": True,
+            }
+        )
+
+    if observed_facts is None:
+        gaps.append({"code": "service_observed_facts_unknown", "severity": "unknown"})
+
+    status = _status_from_gaps(gaps)
+    summary = {
+        "target": _target_ref(desired_service),
+        "status": status,
+        "gap_codes": [gap["code"] for gap in gaps],
+        "dependency_counts": expected["dependency_counts"],
+        "requirements_present": bool(expected["requirements"]),
+        "service_observation_status": observed["service_observation_status"],
+        "ai_review_ready": True,
+        "ai_review_executed": False,
+        "evaluation_scope": "service_lifecycle_requirements_dependencies",
+    }
+    return _payload(
+        target_type=SERVICE_TARGET_TYPE,
+        target_id=_pk(desired_service),
+        status=status,
+        deterministic_summary=summary,
+        actual_refs=actual_refs,
+        observed_facts=observed,
+        expected_facts=expected,
+        gap_summary={"gaps": gaps},
+        recommended_actions=actions,
+    )
+
+
 def _payload(
     *,
     target_type: str,
@@ -307,6 +399,35 @@ def _expected_endpoint_facts(desired_endpoint: Any) -> dict[str, Any]:
         "dns_name": _text(getattr(desired_endpoint, "dns_name", None)),
         "generate_dnsmasq": bool(getattr(desired_endpoint, "generate_dnsmasq", False)),
         "dnsmasq_record_type": _text(getattr(desired_endpoint, "dnsmasq_record_type", None)),
+    }
+
+
+def _expected_service_facts(desired_service: Any, dependencies: list[Any]) -> dict[str, Any]:
+    dependency_facts = [_dependency_facts(dependency) for dependency in dependencies]
+    counts = {
+        "total": len(dependency_facts),
+        "resolved": 0,
+        "unresolved": 0,
+        "external": 0,
+        "ignored": 0,
+        "other": 0,
+    }
+    for dependency in dependency_facts:
+        status = dependency["resolution_status"]
+        counts[status if status in counts else "other"] += 1
+    return {
+        "name": _text(getattr(desired_service, "name", None)),
+        "slug": _text(getattr(desired_service, "slug", None)),
+        "display_name": _text(getattr(desired_service, "display_name", None)),
+        "service_type": _text(getattr(desired_service, "service_type", None)),
+        "lifecycle": _text(getattr(desired_service, "lifecycle", None)),
+        "catalog_namespace": _text(getattr(desired_service, "catalog_namespace", None)),
+        "catalog_metadata_name": _text(getattr(desired_service, "catalog_metadata_name", None)),
+        "catalog_owner": _text(getattr(desired_service, "catalog_owner", None)),
+        "requirements": _mapping(getattr(desired_service, "requirements", None)),
+        "placement_policy": _mapping(getattr(desired_service, "placement_policy", None)),
+        "dependencies": dependency_facts,
+        "dependency_counts": counts,
     }
 
 
@@ -427,6 +548,21 @@ def _actual_ip_facts(actual_ip: Any) -> dict[str, Any]:
     }
 
 
+def _dependency_facts(dependency: Any) -> dict[str, Any]:
+    resolved_service = getattr(dependency, "resolved_service", None)
+    facts = {
+        "dependency_kind": _text(getattr(dependency, "dependency_kind", None)),
+        "namespace": _text(getattr(dependency, "namespace", None)),
+        "name": _text(getattr(dependency, "name", None)),
+        "raw_ref": _text(getattr(dependency, "raw_ref", None)),
+        "dependency_type": _text(getattr(dependency, "dependency_type", None)),
+        "resolution_status": _text(getattr(dependency, "resolution_status", None)) or "unresolved",
+    }
+    if resolved_service is not None:
+        facts["resolved_service"] = _target_ref(resolved_service)
+    return facts
+
+
 def _matching_ip_candidates(ip_address: Any, ip_candidates: Iterable[Any]) -> list[dict[str, Any]]:
     expected = _host_address(ip_address)
     if not expected:
@@ -488,6 +624,32 @@ def _interfaces(actual_node: Any) -> list[Any]:
     if hasattr(interfaces, "all"):
         return list(interfaces.all())
     return list(interfaces)
+
+
+def _service_dependencies(desired_service: Any, dependencies: Iterable[Any] | None) -> list[Any]:
+    if dependencies is not None:
+        return list(dependencies)
+    related = getattr(desired_service, "dependencies", None)
+    if related is None:
+        return []
+    if hasattr(related, "all"):
+        return list(related.all())
+    return list(related)
+
+
+def _status_from_gaps(gaps: list[dict[str, Any]]) -> str:
+    severities = {gap.get("severity") for gap in gaps}
+    if "conflict" in severities:
+        return "conflict"
+    if "missing" in severities:
+        return "missing"
+    if "partial" in severities:
+        return "partial"
+    if "needs_review" in severities:
+        return "needs_review"
+    if "unknown" in severities:
+        return "unknown"
+    return "satisfied"
 
 
 def _actual_ref(object_type: str, obj: Any) -> dict[str, Any]:

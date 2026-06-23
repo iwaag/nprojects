@@ -3,7 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from nautobot_intent_catalog.evaluations import evaluate_endpoint_intent, evaluate_node_intent
+from nautobot_intent_catalog.evaluations import (
+    evaluate_endpoint_intent,
+    evaluate_node_intent,
+    evaluate_service_intent,
+)
 
 
 def obj(**kwargs):
@@ -72,6 +76,39 @@ def interface(**overrides):
         "name": "eth0",
         "mac_address": "AA-BB-CC-DD-EE-FF",
         "enabled": True,
+    }
+    data.update(overrides)
+    return obj(**data)
+
+
+def service(**overrides):
+    data = {
+        "pk": "33333333-3333-3333-3333-333333333333",
+        "name": "api-service",
+        "slug": "api-service",
+        "display_name": "API Service",
+        "service_type": "service",
+        "lifecycle": "active",
+        "catalog_namespace": "default",
+        "catalog_metadata_name": "api",
+        "catalog_owner": "platform",
+        "requirements": {"memory_gb": 2},
+        "placement_policy": {},
+        "dependencies": [],
+    }
+    data.update(overrides)
+    return obj(**data)
+
+
+def dependency(**overrides):
+    data = {
+        "dependency_kind": "component",
+        "namespace": "default",
+        "name": "database",
+        "raw_ref": "component:default/database",
+        "dependency_type": "component",
+        "resolution_status": "unresolved",
+        "resolved_service": None,
     }
     data.update(overrides)
     return obj(**data)
@@ -187,6 +224,47 @@ class EndpointEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "ambiguous_interface")
         self.assertFalse(payload.deterministic_summary["dhcp_reservation_ready"])
         self.assertEqual(payload.recommended_actions[0]["action"], "select_dhcp_interface")
+
+
+class ServiceEvaluationTests(unittest.TestCase):
+    def test_unresolved_dependency_is_recorded_as_gap_and_action_without_ai_output(self) -> None:
+        payload = evaluate_service_intent(
+            service(dependencies=[dependency()]),
+            ai_review_enabled=True,
+        )
+
+        self.assertEqual(payload.target_type, "desired_service")
+        self.assertEqual(payload.status, "partial")
+        self.assertEqual(payload.observed_facts["ai_review"], {"enabled": True, "executed": False})
+        gap_codes = [gap["code"] for gap in payload.gap_summary["gaps"]]
+        self.assertIn("unresolved_dependency", gap_codes)
+        self.assertIn("service_observed_facts_unknown", gap_codes)
+        self.assertEqual(payload.recommended_actions[0]["action"], "resolve_service_dependency")
+        self.assertEqual(payload.recommended_actions[0]["dependency"]["raw_ref"], "component:default/database")
+
+    def test_service_with_provided_observed_facts_and_resolved_dependencies_is_satisfied(self) -> None:
+        payload = evaluate_service_intent(
+            service(
+                dependencies=[
+                    dependency(
+                        resolution_status="resolved",
+                        resolved_service=service(
+                            pk="44444444-4444-4444-4444-444444444444",
+                            name="database",
+                            slug="database",
+                            display_name="Database",
+                            catalog_metadata_name="database",
+                        ),
+                    )
+                ],
+            ),
+            observed_facts={"monitoring": {"status": "ok"}},
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertEqual(payload.observed_facts["service_observation_status"], "provided")
+        self.assertEqual(payload.deterministic_summary["dependency_counts"]["resolved"], 1)
+        self.assertEqual(payload.recommended_actions, [])
 
 
 if __name__ == "__main__":

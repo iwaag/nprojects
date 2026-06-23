@@ -61,7 +61,8 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
 - Provides `Quick Host Add` for creating one desired node and one primary endpoint from one Nautobot form.
 - Persists `IntentEvaluation` rows for desired-vs-actual gap data.
-- Evaluates desired nodes and endpoints against Nautobot actual objects.
+- Evaluates desired services, desired nodes, and desired endpoints against
+  deterministic state and Nautobot actual objects.
 - Exports deterministic dnsmasq DNS records and DHCP reservations from eligible
   desired endpoints.
 - Keeps a diagnostic YAML source view at `/plugins/intent-catalog/sources/source-yaml/`.
@@ -221,6 +222,14 @@ Structured deterministic fields are kept separate from optional AI review:
 `ai_review` may be empty. Deterministic evaluations and recommended actions are
 valid without any model-generated review.
 
+Run `Evaluate Service Intent` to compare `DesiredService` rows with their
+lifecycle, requirements, and `DesiredDependency` resolution state. Missing
+nodeutils or monitoring facts are stored as `unknown` optional input instead of
+failing the evaluation. The Job reserves an AI review interface in
+`observed_facts.ai_review` but does not call a model; future review tasks should
+consume the deterministic fields first and write generated review output only to
+`ai_review` and `review_model`.
+
 Run `Evaluate Node Intent` to compare `DesiredNode` rows with actual Nautobot
 `Device` and `VirtualMachine` rows. Explicit `realized_device` or `realized_vm`
 links are authoritative and are evaluated before candidate discovery. Unlinked
@@ -239,9 +248,44 @@ lines only when the reservation is unambiguous.
 
 Initial recommended action examples:
 
+- `resolve_service_dependency`
+- `review_service_lifecycle`
 - `link_desired_node_to_actual`
 - `create_or_link_ip_address`
 - `select_dhcp_interface`
+
+Recommended actions are JSON objects with a stable action name, a target, a
+reason, and a review flag. Optional keys carry action-specific context such as
+`dependency`, `actual_ref`, or `candidates`.
+
+```json
+{
+  "action": "resolve_service_dependency",
+  "target": {"id": "<desired-service-uuid>", "name": "api-service"},
+  "dependency": {
+    "dependency_kind": "component",
+    "namespace": "default",
+    "name": "database",
+    "raw_ref": "component:default/database",
+    "dependency_type": "component",
+    "resolution_status": "unresolved"
+  },
+  "reason": "A desired service dependency is unresolved.",
+  "requires_review": true
+}
+```
+
+Agent and Ansible integrations should treat these surfaces as the stable query
+boundary:
+
+- desired state: `DesiredService`, `DesiredDependency`, `DesiredNode`,
+  `DesiredEndpoint`
+- actual state: Nautobot `Device`, `VirtualMachine`, `IPAddress`, and related
+  interface facts referenced from evaluations
+- evaluation state: `IntentEvaluation.target_type`, `target_id`, `status`,
+  `deterministic_summary`, `actual_refs`, `observed_facts`, `expected_facts`,
+  `gap_summary`, `recommended_actions`
+- dnsmasq deployment input: JobResult files from `Export dnsmasq Records`
 
 For local checks that do not require Nautobot:
 
@@ -259,10 +303,14 @@ When replacing an older installation, review your Nautobot environment and
 manually remove obsolete data only after exporting anything you need to keep.
 Typical cleanup items are:
 
-- old plugin entries in `PLUGINS`
-- old plugin configuration keys in `PLUGINS_CONFIG`
-- old App database tables and migration history rows
-- old package installations from the Python environment
+- old plugin entries in `PLUGINS`, such as `nautobot_service_catalog`
+- old plugin configuration keys in `PLUGINS_CONFIG`, such as
+  `nautobot_service_catalog`
+- old App database tables and migration history rows for the removed Service
+  Catalog app
+- old URL references to `/plugins/service-catalog/`
+- old package installations such as `nautobot-service-catalog` from the Python
+  environment
 
 The exact SQL or operational commands depend on the Nautobot deployment and
 database backend, so perform cleanup from an environment-specific maintenance

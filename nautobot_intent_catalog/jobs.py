@@ -7,7 +7,13 @@ from pathlib import Path
 
 from .analysis import analyze_intent_sources
 from .dnsmasq import export_dnsmasq_records, render_dnsmasq_export_json, render_dnsmasq_records_conf
-from .evaluations import ENDPOINT_TARGET_TYPE, NODE_TARGET_TYPE, evaluate_endpoint_intent, evaluate_node_intent
+from .evaluations import (
+    ENDPOINT_TARGET_TYPE,
+    NODE_TARGET_TYPE,
+    evaluate_endpoint_intent,
+    evaluate_node_intent,
+    evaluate_service_intent,
+)
 from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
@@ -370,6 +376,45 @@ else:
             self.logger.info("Desired endpoint evaluation summary: %s", _json(counts))
 
 
+    class EvaluateServiceIntent(Job):
+        """Evaluate desired services without invoking AI review."""
+
+        include_inactive = BooleanVar(
+            default=False,
+            description="Include deprecated and retired DesiredService rows.",
+        )
+        ai_review_enabled = BooleanVar(
+            default=False,
+            description="Reserve the AI review interface in evaluation facts without executing AI review.",
+        )
+
+        class Meta:
+            name = "Evaluate Service Intent"
+            description = "Persist deterministic DesiredService evaluations from lifecycle, requirements, and dependencies."
+            has_sensitive_variables = False
+
+        def run(self, include_inactive: bool, ai_review_enabled: bool) -> None:
+            services = DesiredService.objects.select_related("intent_source").prefetch_related(
+                "dependencies",
+                "dependencies__resolved_service",
+            ).order_by("catalog_namespace", "catalog_metadata_name", "service_type")
+            if not include_inactive:
+                services = services.exclude(lifecycle__in=("deprecated", "retired"))
+
+            counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
+            for desired_service in services:
+                payload = evaluate_service_intent(
+                    desired_service,
+                    ai_review_enabled=ai_review_enabled,
+                )
+                created = _upsert_evaluation(payload)
+                counts["evaluated"] += 1
+                counts["created" if created else "updated"] += 1
+                counts["statuses"][payload.status] = counts["statuses"].get(payload.status, 0) + 1
+
+            self.logger.info("Desired service evaluation summary: %s", _json(counts))
+
+
     class ExportDnsmasqRecords(Job):
         """Dry-run export desired endpoint dnsmasq records."""
 
@@ -427,6 +472,7 @@ else:
         AnalyzeIntentSources,
         EvaluateNodeIntent,
         EvaluateEndpointIntent,
+        EvaluateServiceIntent,
         ExportDnsmasqRecords,
     )
     register_jobs(*jobs)

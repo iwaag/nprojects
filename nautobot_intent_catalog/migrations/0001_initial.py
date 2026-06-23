@@ -381,7 +381,7 @@ class Migration(migrations.Migration):
             model_name="desiredservice",
             constraint=models.UniqueConstraint(
                 fields=("intent_source", "catalog_namespace", "catalog_metadata_name", "service_type"),
-                name="nic_unique_service_catalog_entity",
+                name="nic_unique_desired_service_entity",
             ),
         ),
         migrations.AddConstraint(

@@ -53,11 +53,11 @@ inside that Nautobot environment and review only the App model differences.
 ## Rename Cleanup Checks
 
 Before completing a rename-oriented step, run searches for old implementation
-names:
+names. The concrete cleanup search patterns and manual removal targets are
+documented in `README.md` under `Manual Cleanup During Rename`.
 
 ```bash
-rg "nautobot_service_catalog|Service Catalog|service-catalog|nautobot-service-catalog"
-rg "RepositoryEntry|load_service_repositories|service_repositories_file"
+rg "old implementation name pattern"
 ```
 
 Only migration history notes or explicit manual cleanup documentation should
