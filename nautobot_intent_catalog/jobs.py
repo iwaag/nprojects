@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from .analysis import analyze_intent_sources
-from .dnsmasq import export_dnsmasq_records
+from .dnsmasq import export_dnsmasq_records, render_dnsmasq_export_json, render_dnsmasq_records_conf
 from .importers import (
     desired_service_defaults,
     desired_service_dependencies,
@@ -305,8 +305,18 @@ else:
                 "name",
             )
             export = export_dnsmasq_records(endpoints, include_skipped=include_skipped)
+            generated_at = timezone.now().isoformat()
+            job_result_id = str(getattr(self.job_result, "id", "")) or None
+            self.create_file(
+                "dnsmasq-records.conf",
+                render_dnsmasq_records_conf(export, generated_at=generated_at, job_result_id=job_result_id),
+            )
+            self.create_file(
+                "dnsmasq-export.json",
+                render_dnsmasq_export_json(export, generated_at=generated_at, job_result_id=job_result_id),
+            )
             self.logger.info("dnsmasq export summary: %s", _json(export.summary))
-            self.logger.info("dnsmasq export records: %s", _json(export.records))
+            self.logger.info("dnsmasq export files: dnsmasq-records.conf, dnsmasq-export.json")
             if include_skipped:
                 self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
 

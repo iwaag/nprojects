@@ -147,7 +147,13 @@ managed from a source file or reviewed as a batch.
 
 ## dnsmasq Export
 
-Run the `Export dnsmasq Records` Job to log a deterministic dry-run payload.
+Run the `Export dnsmasq Records` Job to create deterministic JobResult output
+files for automation:
+
+- `dnsmasq-records.conf`: dnsmasq-ready configuration lines.
+- `dnsmasq-export.json`: machine-readable export metadata, records, and skipped
+  endpoint details for Ansible, audit, and troubleshooting.
+
 The Python API is `nautobot_intent_catalog.dnsmasq.export_dnsmasq_records()`;
 it returns a dictionary-friendly structure with `summary`, `records`, and
 `skipped` entries.

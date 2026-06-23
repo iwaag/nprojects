@@ -73,3 +73,36 @@ When using `ButtonsColumn` on Nautobot 3.1.x or later, either:
 Also check related table columns using `tables.LinkColumn()`. They rely on the
 related object's `get_absolute_url()`, so the target detail route and template
 must exist if users can click through.
+
+## Nautobot 2.x/3.x Job registration notes
+
+Date: 2026-06-23
+
+### Symptoms
+
+After adding `Export dnsmasq Records`, the Job class existed in
+`nautobot_intent_catalog/jobs.py`, but the job did not appear in the Nautobot
+Jobs list after reload/post-upgrade.
+
+### Cause
+
+Defining Job classes and a module-level `jobs = (...)` tuple is not sufficient
+for current Nautobot job discovery. Nautobot 2.x/3.x apps should register jobs
+from the jobs module with `register_jobs()`.
+
+This can be confusing because older Job records may still be present in the
+database and visible in the UI, while newly added Job classes do not get
+created unless they are registered during module import.
+
+### Fix applied here
+
+Import `register_jobs` from `nautobot.apps.jobs` and call it after all Job
+classes are defined:
+
+```python
+jobs = (PreviewIntentSourceAnalysis, ImportIntentSources, AnalyzeIntentSources, ExportDnsmasqRecords)
+register_jobs(*jobs)
+```
+
+After changing job registration, run Nautobot's normal upgrade/sync workflow
+and restart both web and worker processes.
