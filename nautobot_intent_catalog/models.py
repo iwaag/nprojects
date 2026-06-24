@@ -311,6 +311,15 @@ else:
             (DNSMASQ_CNAME, "cname"),
         )
 
+        IP_POLICY_STATIC = "static"
+        IP_POLICY_DHCP_RESERVED = "dhcp_reserved"
+        IP_POLICY_EXTERNAL = "external"
+        IP_POLICY_CHOICES = (
+            (IP_POLICY_STATIC, "Static"),
+            (IP_POLICY_DHCP_RESERVED, "DHCP reserved"),
+            (IP_POLICY_EXTERNAL, "External"),
+        )
+
         name = models.CharField(max_length=255)
         desired_node = models.ForeignKey(
             DesiredNode,
@@ -323,6 +332,11 @@ else:
             default=ENDPOINT_TYPE_PRIMARY,
         )
         ip_address = models.CharField(max_length=128, blank=True, null=True)
+        ip_policy = models.CharField(
+            max_length=64,
+            choices=IP_POLICY_CHOICES,
+            default=IP_POLICY_STATIC,
+        )
         dns_name = models.CharField(max_length=255, blank=True, null=True)
         mdns_name = models.CharField(max_length=255, blank=True, null=True)
         vpn_dns_name = models.CharField(max_length=255, blank=True, null=True)
@@ -359,6 +373,63 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:desiredendpoint", args=[self.pk])
+
+
+    class DesiredIPRange(PrimaryModel):
+        """Desired address range intent managed by nintent."""
+
+        RANGE_POLICY_STATIC_POOL = "static_pool"
+        RANGE_POLICY_DHCP_RESERVABLE_POOL = "dhcp_reservable_pool"
+        RANGE_POLICY_DHCP_DYNAMIC_POOL = "dhcp_dynamic_pool"
+        RANGE_POLICY_EXCLUDED = "excluded"
+        RANGE_POLICY_CHOICES = (
+            (RANGE_POLICY_STATIC_POOL, "Static pool"),
+            (RANGE_POLICY_DHCP_RESERVABLE_POOL, "DHCP reservable pool"),
+            (RANGE_POLICY_DHCP_DYNAMIC_POOL, "DHCP dynamic pool"),
+            (RANGE_POLICY_EXCLUDED, "Excluded"),
+        )
+
+        LIFECYCLE_PLANNED = "planned"
+        LIFECYCLE_APPROVED = "approved"
+        LIFECYCLE_ACTIVE = "active"
+        LIFECYCLE_DEPRECATED = "deprecated"
+        LIFECYCLE_RETIRED = "retired"
+        LIFECYCLE_CHOICES = (
+            (LIFECYCLE_PLANNED, "Planned"),
+            (LIFECYCLE_APPROVED, "Approved"),
+            (LIFECYCLE_ACTIVE, "Active"),
+            (LIFECYCLE_DEPRECATED, "Deprecated"),
+            (LIFECYCLE_RETIRED, "Retired"),
+        )
+
+        name = models.CharField(max_length=255)
+        slug = models.SlugField(max_length=255, unique=True)
+        start_address = models.CharField(max_length=128)
+        end_address = models.CharField(max_length=128)
+        range_policy = models.CharField(
+            max_length=64,
+            choices=RANGE_POLICY_CHOICES,
+            default=RANGE_POLICY_STATIC_POOL,
+        )
+        lifecycle = models.CharField(
+            max_length=64,
+            choices=LIFECYCLE_CHOICES,
+            default=LIFECYCLE_PLANNED,
+        )
+        generate_dnsmasq = models.BooleanField(default=False)
+        dnsmasq_options = models.JSONField(default=dict, blank=True)
+        description = models.TextField(blank=True, null=True)
+
+        class Meta:
+            ordering = ("start_address", "end_address", "name")
+            verbose_name = "desired IP range"
+            verbose_name_plural = "desired IP ranges"
+
+        def __str__(self) -> str:
+            return self.name
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:desirediprange", args=[self.pk])
 
 
     class IntentEvaluation(PrimaryModel):

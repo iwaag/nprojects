@@ -6,7 +6,15 @@ try:
     import django_tables2 as tables
     from nautobot.apps.tables import BaseTable, ButtonsColumn, ToggleColumn
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import (
+        DesiredDependency,
+        DesiredEndpoint,
+        DesiredIPRange,
+        DesiredNode,
+        DesiredService,
+        IntentEvaluation,
+        IntentSource,
+    )
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
@@ -177,6 +185,7 @@ else:
                 "desired_node",
                 "endpoint_type",
                 "ip_address",
+                "ip_policy",
                 "dns_name",
                 "protocol",
                 "port",
@@ -191,9 +200,42 @@ else:
                 "desired_node",
                 "endpoint_type",
                 "ip_address",
+                "ip_policy",
                 "dns_name",
                 "protocol",
                 "port",
+                "generate_dnsmasq",
+                "actions",
+            )
+
+
+    class DesiredIPRangeTable(BaseTable):
+        """Desired IP range list table."""
+
+        pk = ToggleColumn()
+        name = tables.LinkColumn()
+        actions = ButtonsColumn(DesiredIPRange, buttons=TABLE_ACTION_BUTTONS)
+
+        class Meta(BaseTable.Meta):
+            model = DesiredIPRange
+            fields = (
+                "pk",
+                "name",
+                "slug",
+                "start_address",
+                "end_address",
+                "range_policy",
+                "lifecycle",
+                "generate_dnsmasq",
+                "actions",
+            )
+            default_columns = (
+                "pk",
+                "name",
+                "start_address",
+                "end_address",
+                "range_policy",
+                "lifecycle",
                 "generate_dnsmasq",
                 "actions",
             )

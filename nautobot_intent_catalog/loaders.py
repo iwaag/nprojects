@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,7 +67,23 @@ class DesiredEndpointEntry:
     protocol: str | None = None
     port: int | None = None
     generate_dnsmasq: bool = False
+    ip_policy: str | None = None
     dnsmasq_record_type: str = "host_record"
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class DesiredIPRangeEntry:
+    """One desired IP range row normalized from YAML."""
+
+    name: str
+    slug: str
+    start_address: str
+    end_address: str
+    range_policy: str
+    lifecycle: str = "planned"
+    generate_dnsmasq: bool = False
+    dnsmasq_options: dict[str, Any] = field(default_factory=dict)
     description: str | None = None
 
 
@@ -77,6 +94,7 @@ class IntentSourceLoadResult:
     source_path: Path
     intent_sources: list[IntentSourceEntry] = field(default_factory=list)
     desired_nodes: list[DesiredNodeEntry] = field(default_factory=list)
+    desired_ip_ranges: list[DesiredIPRangeEntry] = field(default_factory=list)
     desired_endpoints: list[DesiredEndpointEntry] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -139,6 +157,7 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
 
     intent_sources: list[IntentSourceEntry] = []
     desired_nodes: list[DesiredNodeEntry] = []
+    desired_ip_ranges: list[DesiredIPRangeEntry] = []
     desired_endpoints: list[DesiredEndpointEntry] = []
     errors: list[str] = []
 
@@ -158,6 +177,14 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
             desired_nodes.append(entry)
         errors.extend(entry_errors)
 
+    raw_ip_ranges, ip_range_errors = _list_section(data, "desired_ip_ranges")
+    errors.extend(ip_range_errors)
+    for index, item in enumerate(raw_ip_ranges, start=1):
+        entry, entry_errors = _normalize_desired_ip_range_entry(item, index)
+        if entry is not None:
+            desired_ip_ranges.append(entry)
+        errors.extend(entry_errors)
+
     raw_endpoints, endpoint_errors = _list_section(data, "desired_endpoints")
     errors.extend(endpoint_errors)
     for index, item in enumerate(raw_endpoints, start=1):
@@ -172,6 +199,7 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
         source_path=source_path,
         intent_sources=intent_sources,
         desired_nodes=desired_nodes,
+        desired_ip_ranges=desired_ip_ranges,
         desired_endpoints=desired_endpoints,
         errors=errors,
     )
@@ -274,6 +302,22 @@ def _normalize_desired_endpoint_entry(item: Any, index: int) -> tuple[DesiredEnd
     port, port_error = _optional_port(item.get("port"), index)
     if port_error:
         errors.append(port_error)
+    ip_address = _optional_str(item.get("ip_address"))
+    raw_ip_policy = item.get("ip_policy")
+    ip_policy: str | None = None
+    ip_policy_error: str | None = None
+    if ip_address or raw_ip_policy is not None:
+        ip_policy, ip_policy_error = _choice_or_error(
+            raw_ip_policy,
+            _IP_POLICIES,
+            f"desired_endpoints entry {index} ip_policy",
+        )
+    if ip_address and raw_ip_policy is None:
+        errors.append(f"desired_endpoints entry {index} is missing required field: ip_policy.")
+    elif ip_policy_error:
+        errors.append(ip_policy_error)
+    if ip_policy is None and not ip_address:
+        ip_policy = "external"
     if errors:
         return None, errors
 
@@ -282,14 +326,79 @@ def _normalize_desired_endpoint_entry(item: Any, index: int) -> tuple[DesiredEnd
             name=name or "",
             desired_node=desired_node or "",
             endpoint_type=_choice(item.get("endpoint_type"), _ENDPOINT_TYPES, "primary"),
-            ip_address=_optional_str(item.get("ip_address")),
+            ip_address=ip_address,
             dns_name=_optional_str(item.get("dns_name")),
             mdns_name=_optional_str(item.get("mdns_name")),
             vpn_dns_name=_optional_str(item.get("vpn_dns_name")),
             protocol=_optional_str(item.get("protocol")),
             port=port,
             generate_dnsmasq=_as_bool(item.get("generate_dnsmasq", False)),
+            ip_policy=ip_policy,
             dnsmasq_record_type=_choice(item.get("dnsmasq_record_type"), _DNSMASQ_RECORD_TYPES, "host_record"),
+            description=_optional_str(item.get("description")),
+        ),
+        [],
+    )
+
+
+def _normalize_desired_ip_range_entry(item: Any, index: int) -> tuple[DesiredIPRangeEntry | None, list[str]]:
+    """Normalize one desired IP range YAML item."""
+
+    if not isinstance(item, dict):
+        return None, [f"desired_ip_ranges entry {index} must be a mapping."]
+
+    name = _optional_str(item.get("name"))
+    slug = _optional_str(item.get("slug"))
+    start_address = _optional_str(item.get("start_address"))
+    end_address = _optional_str(item.get("end_address"))
+    errors = []
+    if not name:
+        errors.append(f"desired_ip_ranges entry {index} is missing required field: name.")
+    if not slug:
+        errors.append(f"desired_ip_ranges entry {index} is missing required field: slug.")
+    if not start_address:
+        errors.append(f"desired_ip_ranges entry {index} is missing required field: start_address.")
+    if not end_address:
+        errors.append(f"desired_ip_ranges entry {index} is missing required field: end_address.")
+
+    range_policy, range_policy_error = _choice_or_error(
+        item.get("range_policy"),
+        _RANGE_POLICIES,
+        f"desired_ip_ranges entry {index} range_policy",
+    )
+    if range_policy_error:
+        errors.append(range_policy_error)
+
+    lifecycle, lifecycle_error = _choice_or_error(
+        item.get("lifecycle", "planned"),
+        _LIFECYCLES,
+        f"desired_ip_ranges entry {index} lifecycle",
+    )
+    if lifecycle_error:
+        errors.append(lifecycle_error)
+
+    if start_address:
+        errors.extend(_address_errors(start_address, f"desired_ip_ranges entry {index} start_address"))
+    if end_address:
+        errors.extend(_address_errors(end_address, f"desired_ip_ranges entry {index} end_address"))
+
+    dnsmasq_options = item.get("dnsmasq_options") or {}
+    if not isinstance(dnsmasq_options, dict):
+        errors.append(f"desired_ip_ranges entry {index} dnsmasq_options must be a mapping.")
+
+    if errors:
+        return None, errors
+
+    return (
+        DesiredIPRangeEntry(
+            name=name or "",
+            slug=slug or "",
+            start_address=start_address or "",
+            end_address=end_address or "",
+            range_policy=range_policy or "static_pool",
+            lifecycle=lifecycle or "planned",
+            generate_dnsmasq=_as_bool(item.get("generate_dnsmasq", False)),
+            dnsmasq_options=_plain_mapping(dnsmasq_options),
             description=_optional_str(item.get("description")),
         ),
         [],
@@ -341,6 +450,23 @@ def _choice(value: Any, allowed: set[str], default: str) -> str:
     return normalized if normalized in allowed else default
 
 
+def _choice_or_error(value: Any, allowed: set[str], field_name: str) -> tuple[str | None, str | None]:
+    if value is None or value == "":
+        return None, f"{field_name} is missing required field."
+    normalized = str(value).strip().lower().replace("-", "_")
+    if normalized in allowed:
+        return normalized, None
+    return None, f"{field_name} must be one of: {', '.join(sorted(allowed))}."
+
+
+def _address_errors(value: str, field_name: str) -> list[str]:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return [f"{field_name} must be a valid IP address."]
+    return []
+
+
 def _plain_mapping(value: dict[Any, Any]) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
@@ -375,3 +501,5 @@ _NODE_TYPES = {"device", "virtual_machine", "container", "service_host", "networ
 _LIFECYCLES = {"planned", "approved", "active", "deprecated", "retired"}
 _ENDPOINT_TYPES = {"primary", "management", "service", "vpn", "mdns", "other"}
 _DNSMASQ_RECORD_TYPES = {"host_record", "address", "cname"}
+_IP_POLICIES = {"static", "dhcp_reserved", "external"}
+_RANGE_POLICIES = {"static_pool", "dhcp_reservable_pool", "dhcp_dynamic_pool", "excluded"}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <h1>{{ object.name }}</h1>
+
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <strong>Desired IP Range</strong>
+                </div>
+                <table class="table table-hover attr-table">
+                    <tr>
+                        <th scope="row">Name</th>
+                        <td>{{ object.name }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Slug</th>
+                        <td><code>{{ object.slug }}</code></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Start Address</th>
+                        <td>{{ object.start_address }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">End Address</th>
+                        <td>{{ object.end_address }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Range Policy</th>
+                        <td>{{ object.get_range_policy_display|default:object.range_policy }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Lifecycle</th>
+                        <td>{{ object.get_lifecycle_display|default:object.lifecycle }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Generate dnsmasq</th>
+                        <td>{{ object.generate_dnsmasq|yesno:"Yes,No" }}</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">dnsmasq Options</th>
+                        <td><pre>{{ object.dnsmasq_options|default:"{}" }}</pre></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Description</th>
+                        <td>{{ object.description|default:"-" }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

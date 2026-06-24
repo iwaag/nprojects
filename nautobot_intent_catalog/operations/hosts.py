@@ -45,6 +45,7 @@ def create_desired_node_with_primary_endpoint(
     protocol: str | None = None,
     port: int | None = None,
     generate_dnsmasq: bool = True,
+    ip_policy: str = "dhcp_reserved",
     dnsmasq_record_type: str = "host_record",
     endpoint_name: str = "primary",
     endpoint_type: str = "primary",
@@ -73,6 +74,7 @@ def create_desired_node_with_primary_endpoint(
         "vpn_dns_name": _optional_str(vpn_dns_name),
         "protocol": _optional_str(protocol),
         "port": port,
+        "ip_policy": _required_str(ip_policy, "ip_policy"),
         "dnsmasq_record_type": _required_str(dnsmasq_record_type, "dnsmasq_record_type"),
         "endpoint_name": _required_str(endpoint_name, "endpoint_name"),
         "endpoint_type": _required_str(endpoint_type, "endpoint_type"),
@@ -119,6 +121,7 @@ def create_desired_node_with_primary_endpoint(
                 protocol=cleaned["protocol"],
                 port=cleaned["port"],
                 generate_dnsmasq=generate_dnsmasq,
+                ip_policy=cleaned["ip_policy"],
                 dnsmasq_record_type=cleaned["dnsmasq_record_type"],
             )
             desired_endpoint.full_clean()

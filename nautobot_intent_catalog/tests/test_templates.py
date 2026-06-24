@@ -14,6 +14,7 @@ class ObjectViewTemplateTests(unittest.TestCase):
         expected_templates = {
             "desireddependency.html",
             "desiredendpoint.html",
+            "desirediprange.html",
             "desirednode.html",
             "desiredservice.html",
             "intentevaluation.html",

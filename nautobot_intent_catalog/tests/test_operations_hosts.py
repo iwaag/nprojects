@@ -136,6 +136,7 @@ class HostOperationTests(unittest.TestCase):
         self.assertEqual(result.desired_endpoint.dns_name, "app-vm-1.example.test")
         self.assertEqual(result.desired_endpoint.mdns_name, "app-vm-1.local")
         self.assertTrue(result.desired_endpoint.generate_dnsmasq)
+        self.assertEqual(result.desired_endpoint.ip_policy, "dhcp_reserved")
         self.assertEqual(result.desired_endpoint.dnsmasq_record_type, "host_record")
 
     def test_blank_primary_endpoint_dns_and_mdns_names_are_defaulted(self) -> None:

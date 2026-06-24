@@ -162,6 +162,7 @@ def resolve_dhcp_reservation(
         "dns_name": dns_name,
         "endpoint_type": _text(getattr(endpoint, "endpoint_type", None)),
         "ip_address": ip_address,
+        "ip_policy": _text(getattr(endpoint, "ip_policy", None)),
         "line": line,
         "mac_address": mac_address,
         "skip_reasons": sorted(set(skip_reasons)),
@@ -234,7 +235,10 @@ def _dns_skip_reasons(endpoint: Any) -> list[str]:
 
 
 def _dhcp_skip_reasons(endpoint: Any) -> list[str]:
-    return _base_skip_reasons(endpoint)
+    reasons = _base_skip_reasons(endpoint)
+    if _text(getattr(endpoint, "ip_policy", None)) != "dhcp_reserved":
+        reasons.append("ip_policy_not_dhcp_reserved")
+    return reasons
 
 
 def _base_skip_reasons(endpoint: Any) -> list[str]:
@@ -286,6 +290,7 @@ def _dns_record_entry(endpoint: Any) -> dict[str, Any]:
         "endpoint_name": _text(getattr(endpoint, "name", None)),
         "endpoint_type": _text(getattr(endpoint, "endpoint_type", None)),
         "ip_address": ip_address,
+        "ip_policy": _text(getattr(endpoint, "ip_policy", None)),
         "line": line,
         "mdns_name": _text(getattr(endpoint, "mdns_name", None)),
         "record_name": record_name,
@@ -305,6 +310,7 @@ def _skip_entry(endpoint: Any, item_type: str, reasons: list[str]) -> dict[str, 
         "dns_name": _text(getattr(endpoint, "dns_name", None)),
         "endpoint_name": _text(getattr(endpoint, "name", None)),
         "endpoint_type": _text(getattr(endpoint, "endpoint_type", None)),
+        "ip_policy": _text(getattr(endpoint, "ip_policy", None)),
         "item_type": item_type,
         "reasons": sorted(set(reasons)),
     }

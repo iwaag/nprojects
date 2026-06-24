@@ -7,6 +7,8 @@ from nautobot_intent_catalog.importers import (
     dependency_key,
     desired_endpoint_defaults,
     desired_endpoint_identity,
+    desired_ip_range_defaults,
+    desired_ip_range_identity,
     desired_node_defaults,
     desired_node_identity,
     desired_service_defaults,
@@ -14,7 +16,7 @@ from nautobot_intent_catalog.importers import (
     desired_service_identity,
     intent_source_defaults,
 )
-from nautobot_intent_catalog.loaders import DesiredEndpointEntry, DesiredNodeEntry, IntentSourceEntry
+from nautobot_intent_catalog.loaders import DesiredEndpointEntry, DesiredIPRangeEntry, DesiredNodeEntry, IntentSourceEntry
 
 
 class ImporterTests(unittest.TestCase):
@@ -144,6 +146,7 @@ class ImporterTests(unittest.TestCase):
             desired_node="edge-router-1",
             endpoint_type="management",
             ip_address="192.0.2.10/32",
+            ip_policy="dhcp_reserved",
             dns_name="edge-router-1.example.test",
             protocol="https",
             port=443,
@@ -168,10 +171,22 @@ class ImporterTests(unittest.TestCase):
                 "protocol": "https",
                 "port": 443,
                 "generate_dnsmasq": True,
+                "ip_policy": "dhcp_reserved",
                 "dnsmasq_record_type": "host_record",
                 "description": None,
             },
         )
+
+    def test_desired_endpoint_defaults_reject_missing_ip_policy_for_ip_intent(self) -> None:
+        endpoint = DesiredEndpointEntry(
+            name="mgmt",
+            desired_node="edge-router-1",
+            endpoint_type="management",
+            ip_address="192.0.2.10/32",
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires ip_policy"):
+            desired_endpoint_defaults(endpoint)
 
     def test_primary_desired_endpoint_defaults_missing_names_from_resolved_node(self) -> None:
         endpoint = DesiredEndpointEntry(
@@ -193,6 +208,7 @@ class ImporterTests(unittest.TestCase):
                 "protocol": None,
                 "port": None,
                 "generate_dnsmasq": False,
+                "ip_policy": "external",
                 "dnsmasq_record_type": "host_record",
                 "description": None,
             },
@@ -225,6 +241,34 @@ class ImporterTests(unittest.TestCase):
 
         self.assertIsNone(defaults["dns_name"])
         self.assertIsNone(defaults["mdns_name"])
+
+    def test_desired_ip_range_identity_and_defaults(self) -> None:
+        ip_range = DesiredIPRangeEntry(
+            name="home-dynamic-dhcp",
+            slug="home-dynamic-dhcp",
+            start_address="192.168.0.200",
+            end_address="192.168.0.250",
+            range_policy="dhcp_dynamic_pool",
+            lifecycle="active",
+            generate_dnsmasq=True,
+            dnsmasq_options={"lease_time": "12h"},
+            description="Home DHCP dynamic pool",
+        )
+
+        self.assertEqual(desired_ip_range_identity(ip_range), {"slug": "home-dynamic-dhcp"})
+        self.assertEqual(
+            desired_ip_range_defaults(ip_range),
+            {
+                "name": "home-dynamic-dhcp",
+                "start_address": "192.168.0.200",
+                "end_address": "192.168.0.250",
+                "range_policy": "dhcp_dynamic_pool",
+                "lifecycle": "active",
+                "generate_dnsmasq": True,
+                "dnsmasq_options": {"lease_time": "12h"},
+                "description": "Home DHCP dynamic pool",
+            },
+        )
 
 
 if __name__ == "__main__":

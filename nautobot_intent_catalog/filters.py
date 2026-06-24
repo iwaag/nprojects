@@ -6,7 +6,15 @@ try:
     import django_filters
     from nautobot.apps.filters import NautobotFilterSet
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import (
+        DesiredDependency,
+        DesiredEndpoint,
+        DesiredIPRange,
+        DesiredNode,
+        DesiredService,
+        IntentEvaluation,
+        IntentSource,
+    )
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
@@ -115,6 +123,7 @@ else:
                 "desired_node",
                 "endpoint_type",
                 "ip_address",
+                "ip_policy",
                 "dns_name",
                 "protocol",
                 "port",
@@ -132,6 +141,35 @@ else:
                 | queryset.filter(dns_name__icontains=value)
                 | queryset.filter(mdns_name__icontains=value)
                 | queryset.filter(vpn_dns_name__icontains=value)
+            )
+
+
+    class DesiredIPRangeFilterSet(NautobotFilterSet):
+        """Filters for desired IP ranges."""
+
+        q = django_filters.CharFilter(method="search", label="Search")
+
+        class Meta:
+            model = DesiredIPRange
+            fields = (
+                "id",
+                "name",
+                "slug",
+                "start_address",
+                "end_address",
+                "range_policy",
+                "lifecycle",
+                "generate_dnsmasq",
+            )
+
+        def search(self, queryset, name, value):
+            if not value.strip():
+                return queryset
+            return (
+                queryset.filter(name__icontains=value)
+                | queryset.filter(slug__icontains=value)
+                | queryset.filter(start_address__icontains=value)
+                | queryset.filter(end_address__icontains=value)
             )
 
 

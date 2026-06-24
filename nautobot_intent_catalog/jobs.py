@@ -21,6 +21,8 @@ from .importers import (
     desired_service_identity,
     desired_endpoint_defaults,
     desired_endpoint_identity,
+    desired_ip_range_defaults,
+    desired_ip_range_identity,
     desired_node_defaults,
     desired_node_identity,
     intent_source_defaults,
@@ -36,7 +38,15 @@ try:
     from nautobot.apps.jobs import BooleanVar, IntegerVar, Job, StringVar, register_jobs
     from nautobot.virtualization.models import VirtualMachine
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import (
+        DesiredDependency,
+        DesiredEndpoint,
+        DesiredIPRange,
+        DesiredNode,
+        DesiredService,
+        IntentEvaluation,
+        IntentSource,
+    )
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
     if importlib.util.find_spec("nautobot") is not None:
         raise
@@ -83,6 +93,9 @@ else:
             summary = {
                 "source_path": str(load_result.source_path),
                 "intent_sources": len(load_result.intent_sources),
+                "desired_nodes": len(load_result.desired_nodes),
+                "desired_ip_ranges": len(load_result.desired_ip_ranges),
+                "desired_endpoints": len(load_result.desired_endpoints),
                 "source_analyses": len(result.source_analyses),
                 "desired_services": len(result.desired_services),
                 "analysis_errors": len(result.errors),
@@ -135,6 +148,9 @@ else:
                 "nodes_created": 0,
                 "nodes_updated": 0,
                 "nodes_unchanged": 0,
+                "ip_ranges_created": 0,
+                "ip_ranges_updated": 0,
+                "ip_ranges_unchanged": 0,
                 "endpoints_created": 0,
                 "endpoints_updated": 0,
                 "endpoints_unchanged": 0,
@@ -176,6 +192,20 @@ else:
                 node_by_key[node.slug] = node_obj
                 node_by_key[node.name] = node_obj
 
+            for ip_range in load_result.desired_ip_ranges:
+                defaults = desired_ip_range_defaults(ip_range)
+                identity = desired_ip_range_identity(ip_range)
+                ip_range_obj, created = DesiredIPRange.objects.get_or_create(**identity, defaults=defaults)
+                if created:
+                    counts["ip_ranges_created"] += 1
+                elif _object_matches_defaults(obj=ip_range_obj, defaults=defaults):
+                    counts["ip_ranges_unchanged"] += 1
+                else:
+                    for key, value in defaults.items():
+                        setattr(ip_range_obj, key, value)
+                    ip_range_obj.save(update_fields=tuple(defaults.keys()))
+                    counts["ip_ranges_updated"] += 1
+
             if load_result.desired_endpoints:
                 existing_nodes = DesiredNode.objects.all()
                 for node_obj in existing_nodes:
@@ -206,6 +236,7 @@ else:
                         "source_path": str(load_result.source_path),
                         "intent_sources": len(load_result.intent_sources),
                         "desired_nodes": len(load_result.desired_nodes),
+                        "desired_ip_ranges": len(load_result.desired_ip_ranges),
                         "desired_endpoints": len(load_result.desired_endpoints),
                         **counts,
                     }

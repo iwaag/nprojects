@@ -7,7 +7,15 @@ try:
     from django.utils.text import slugify
     from nautobot.apps.forms import NautobotModelForm
 
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import (
+        DesiredDependency,
+        DesiredEndpoint,
+        DesiredIPRange,
+        DesiredNode,
+        DesiredService,
+        IntentEvaluation,
+        IntentSource,
+    )
 except ImportError:  # pragma: no cover - Nautobot/Django are unavailable in local unit tests.
     pass
 else:
@@ -35,6 +43,10 @@ else:
         protocol = forms.CharField(max_length=64, required=False)
         port = forms.IntegerField(required=False, min_value=1, max_value=65535)
         generate_dnsmasq = forms.BooleanField(required=False, initial=True)
+        ip_policy = forms.ChoiceField(
+            choices=DesiredEndpoint.IP_POLICY_CHOICES,
+            initial=DesiredEndpoint.IP_POLICY_DHCP_RESERVED,
+        )
         dnsmasq_record_type = forms.ChoiceField(
             choices=DesiredEndpoint.DNSMASQ_RECORD_TYPE_CHOICES,
             initial=DesiredEndpoint.DNSMASQ_HOST_RECORD,
@@ -86,6 +98,7 @@ else:
                 "protocol": self.cleaned_data.get("protocol"),
                 "port": self.cleaned_data.get("port"),
                 "generate_dnsmasq": self.cleaned_data.get("generate_dnsmasq"),
+                "ip_policy": self.cleaned_data["ip_policy"],
                 "dnsmasq_record_type": self.cleaned_data["dnsmasq_record_type"],
                 "endpoint_name": self.cleaned_data["endpoint_name"],
                 "endpoint_type": self.cleaned_data["endpoint_type"],
@@ -192,6 +205,7 @@ else:
                 "desired_node",
                 "endpoint_type",
                 "ip_address",
+                "ip_policy",
                 "dns_name",
                 "mdns_name",
                 "vpn_dns_name",
@@ -200,6 +214,24 @@ else:
                 "generate_dnsmasq",
                 "dnsmasq_record_type",
                 "realized_ip_address",
+                "description",
+            )
+
+
+    class DesiredIPRangeForm(NautobotModelForm):
+        """Edit form for desired IP ranges."""
+
+        class Meta:
+            model = DesiredIPRange
+            fields = (
+                "name",
+                "slug",
+                "start_address",
+                "end_address",
+                "range_policy",
+                "lifecycle",
+                "generate_dnsmasq",
+                "dnsmasq_options",
                 "description",
             )
 

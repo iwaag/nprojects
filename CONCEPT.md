@@ -175,6 +175,7 @@ desired_endpoints:
     desired_node: vm-01
     endpoint_type: primary
     ip_address: 192.168.10.21/24
+    ip_policy: dhcp_reserved
     dns_name: vm-01.example.lan
     generate_dnsmasq: true
 
@@ -182,6 +183,7 @@ desired_endpoints:
     desired_node: vm-01
     endpoint_type: management
     ip_address: 192.168.20.21/24
+    ip_policy: dhcp_reserved
     dns_name: vm-01-mgmt.example.lan
     generate_dnsmasq: true
 ```

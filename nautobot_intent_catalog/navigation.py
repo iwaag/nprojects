@@ -37,6 +37,10 @@ else:
                             name="Desired Endpoints",
                         ),
                         NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:desirediprange_list",
+                            name="Desired IP Ranges",
+                        ),
+                        NavMenuItem(
                             link="plugins:nautobot_intent_catalog:intentevaluation_list",
                             name="Evaluations",
                         ),

@@ -14,6 +14,7 @@ try:
     from .filters import (
         DesiredDependencyFilterSet,
         DesiredEndpointFilterSet,
+        DesiredIPRangeFilterSet,
         DesiredNodeFilterSet,
         DesiredServiceFilterSet,
         IntentEvaluationFilterSet,
@@ -23,16 +24,18 @@ try:
         DesiredDependencyForm,
         DesiredEndpointForm,
         DesiredHostQuickAddForm,
+        DesiredIPRangeForm,
         DesiredNodeForm,
         DesiredServiceForm,
         IntentEvaluationForm,
         IntentSourceForm,
     )
-    from .models import DesiredDependency, DesiredEndpoint, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import DesiredDependency, DesiredEndpoint, DesiredIPRange, DesiredNode, DesiredService, IntentEvaluation, IntentSource
     from .operations import create_desired_node_with_primary_endpoint
     from .tables import (
         DesiredDependencyTable,
         DesiredEndpointTable,
+        DesiredIPRangeTable,
         DesiredNodeTable,
         DesiredServiceTable,
         IntentEvaluationTable,
@@ -202,6 +205,33 @@ else:
         queryset = DesiredEndpoint.objects.all()
 
 
+    class DesiredIPRangeListView(ObjectListView):
+        """List desired IP range records."""
+
+        queryset = DesiredIPRange.objects.all()
+        filterset = DesiredIPRangeFilterSet
+        table = DesiredIPRangeTable
+
+
+    class DesiredIPRangeView(ObjectView):
+        """Show one desired IP range record."""
+
+        queryset = DesiredIPRange.objects.all()
+
+
+    class DesiredIPRangeEditView(ObjectEditView):
+        """Edit a desired IP range record."""
+
+        queryset = DesiredIPRange.objects.all()
+        model_form = DesiredIPRangeForm
+
+
+    class DesiredIPRangeDeleteView(ObjectDeleteView):
+        """Delete a desired IP range record."""
+
+        queryset = DesiredIPRange.objects.all()
+
+
     class IntentEvaluationListView(ObjectListView):
         """List intent evaluation records."""
 
@@ -253,6 +283,7 @@ def source_yaml_intent_source_list(request):
             "source_path": result.source_path,
             "intent_sources": result.intent_sources,
             "desired_nodes": result.desired_nodes,
+            "desired_ip_ranges": result.desired_ip_ranges,
             "desired_endpoints": result.desired_endpoints,
             "errors": result.errors,
         },

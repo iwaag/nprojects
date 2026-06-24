@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any
 from urllib.parse import urlparse
 
-from .loaders import DesiredEndpointEntry, DesiredNodeEntry, IntentSourceEntry
+from .loaders import DesiredEndpointEntry, DesiredIPRangeEntry, DesiredNodeEntry, IntentSourceEntry
 from .names import default_dns_name, default_mdns_name
 
 
@@ -158,6 +158,9 @@ def desired_endpoint_identity(endpoint: DesiredEndpointEntry, desired_node_id: A
 def desired_endpoint_defaults(endpoint: DesiredEndpointEntry, desired_node: Any | None = None) -> dict[str, Any]:
     """Return model defaults for a desired endpoint loader entry."""
 
+    if endpoint.ip_address and not endpoint.ip_policy:
+        raise ValueError("Desired endpoint with ip_address requires ip_policy.")
+
     dns_name = _optional_str(endpoint.dns_name)
     mdns_name = _optional_str(endpoint.mdns_name)
     if desired_node is not None and endpoint.name == "primary" and endpoint.endpoint_type == "primary":
@@ -175,8 +178,30 @@ def desired_endpoint_defaults(endpoint: DesiredEndpointEntry, desired_node: Any 
         "protocol": endpoint.protocol,
         "port": endpoint.port,
         "generate_dnsmasq": endpoint.generate_dnsmasq,
+        "ip_policy": endpoint.ip_policy or "external",
         "dnsmasq_record_type": endpoint.dnsmasq_record_type,
         "description": endpoint.description,
+    }
+
+
+def desired_ip_range_identity(ip_range: DesiredIPRangeEntry) -> dict[str, Any]:
+    """Return the stable identity fields for a desired IP range."""
+
+    return {"slug": ip_range.slug}
+
+
+def desired_ip_range_defaults(ip_range: DesiredIPRangeEntry) -> dict[str, Any]:
+    """Return model defaults for a desired IP range loader entry."""
+
+    return {
+        "name": ip_range.name,
+        "start_address": ip_range.start_address,
+        "end_address": ip_range.end_address,
+        "range_policy": ip_range.range_policy,
+        "lifecycle": ip_range.lifecycle,
+        "generate_dnsmasq": ip_range.generate_dnsmasq,
+        "dnsmasq_options": ip_range.dnsmasq_options,
+        "description": ip_range.description,
     }
 
 

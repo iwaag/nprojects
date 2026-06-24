@@ -34,6 +34,10 @@
                         <td>{{ object.ip_address|default:"-" }}</td>
                     </tr>
                     <tr>
+                        <th scope="row">IP Policy</th>
+                        <td>{{ object.get_ip_policy_display|default:object.ip_policy }}</td>
+                    </tr>
+                    <tr>
                         <th scope="row">DNS Name</th>
                         <td>{{ object.dns_name|default:"-" }}</td>
                     </tr>

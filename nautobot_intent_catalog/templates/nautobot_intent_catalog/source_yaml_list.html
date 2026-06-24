@@ -121,6 +121,44 @@
                 </div>
             {% endif %}
 
+            <h2>Desired IP Ranges</h2>
+            {% if desired_ip_ranges %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Slug</th>
+                                <th>Start Address</th>
+                                <th>End Address</th>
+                                <th>Policy</th>
+                                <th>Lifecycle</th>
+                                <th>dnsmasq</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for desired_ip_range in desired_ip_ranges %}
+                                <tr>
+                                    <td>{{ desired_ip_range.name }}</td>
+                                    <td><code>{{ desired_ip_range.slug }}</code></td>
+                                    <td>{{ desired_ip_range.start_address }}</td>
+                                    <td>{{ desired_ip_range.end_address }}</td>
+                                    <td>{{ desired_ip_range.range_policy }}</td>
+                                    <td>{{ desired_ip_range.lifecycle }}</td>
+                                    <td>{{ desired_ip_range.generate_dnsmasq|yesno:"Yes,No" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default">
+                    <div class="panel-body">
+                        No desired IP ranges are registered.
+                    </div>
+                </div>
+            {% endif %}
+
             <h2>Desired Endpoints</h2>
             {% if desired_endpoints %}
                 <div class="table-responsive">
@@ -131,6 +169,7 @@
                                 <th>Desired Node</th>
                                 <th>Type</th>
                                 <th>IP Address</th>
+                                <th>IP Policy</th>
                                 <th>DNS Name</th>
                                 <th>Protocol</th>
                                 <th>Port</th>
@@ -144,6 +183,7 @@
                                     <td><code>{{ desired_endpoint.desired_node }}</code></td>
                                     <td>{{ desired_endpoint.endpoint_type }}</td>
                                     <td>{{ desired_endpoint.ip_address|default:"-" }}</td>
+                                    <td>{{ desired_endpoint.ip_policy }}</td>
                                     <td>{{ desired_endpoint.dns_name|default:"-" }}</td>
                                     <td>{{ desired_endpoint.protocol|default:"-" }}</td>
                                     <td>{{ desired_endpoint.port|default:"-" }}</td>

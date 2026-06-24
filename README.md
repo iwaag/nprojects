@@ -109,6 +109,7 @@ desired_endpoints:
     desired_node: edge-router-1
     endpoint_type: management
     ip_address: 192.0.2.10/32
+    ip_policy: dhcp_reserved
     dns_name: edge-router-1.example.test
     protocol: https
     port: 443
@@ -132,6 +133,7 @@ desired_endpoints:
     desired_node: pcmain
     endpoint_type: primary
     ip_address: 192.168.10.25/24
+    ip_policy: dhcp_reserved
     generate_dnsmasq: true
 ```
 
@@ -198,6 +200,7 @@ it returns a dictionary-friendly structure with `summary`, `dns_records`,
 Initial export selection requires:
 
 - `generate_dnsmasq: true`
+- explicit endpoint `ip_policy`
 - both `ip_address` and `dns_name`
 - desired node lifecycle of `planned`, `approved`, or `active`
 - endpoint type of `primary`, `management`, `service`, or `vpn`

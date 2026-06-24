@@ -24,6 +24,7 @@ def endpoint(
     desired_node,
     endpoint_type: str = "primary",
     generate_dnsmasq: bool = True,
+    ip_policy: str = "dhcp_reserved",
     dnsmasq_record_type: str = "host_record",
     mdns_name: str | None = None,
     vpn_dns_name: str | None = None,
@@ -38,6 +39,7 @@ def endpoint(
         mdns_name=mdns_name,
         vpn_dns_name=vpn_dns_name,
         generate_dnsmasq=generate_dnsmasq,
+        ip_policy=ip_policy,
         dnsmasq_record_type=dnsmasq_record_type,
     )
 
@@ -183,6 +185,26 @@ class DnsmasqExportTests(unittest.TestCase):
         self.assertIn("missing_endpoint_evaluation", dhcp_skip["reasons"])
         self.assertIn("missing_actual_node", dhcp_skip["reasons"])
         self.assertIn("missing_mac_address", dhcp_skip["reasons"])
+
+    def test_static_endpoint_exports_dns_but_not_dhcp_reservation(self) -> None:
+        active = node("Edge 1", "edge-1", "active")
+        primary = endpoint(
+            name="primary",
+            desired_node=active,
+            dns_name="edge-1.example.test",
+            ip_address="192.0.2.10/32",
+            ip_policy="static",
+        )
+
+        export = export_dnsmasq_records(
+            [primary],
+            endpoint_evaluations=endpoint_evaluation(primary, mac_candidates=[mac_candidate()]),
+        )
+
+        self.assertEqual(export.dns_records[0]["line"], "host-record=edge-1.example.test,192.0.2.10")
+        self.assertEqual(export.dhcp_reservations, [])
+        dhcp_skip = [entry for entry in export.skipped if entry["item_type"] == "dhcp_reservation"][0]
+        self.assertEqual(dhcp_skip["reasons"], ["ip_policy_not_dhcp_reserved"])
 
     def test_dhcp_reservation_is_exported_when_mac_is_unique(self) -> None:
         active = node("Edge 1", "edge-1", "active")
