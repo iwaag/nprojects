@@ -241,7 +241,8 @@ node/interface facts:
 
 1. `Evaluate Node Intent`
 2. `Evaluate Endpoint Intent`
-3. `Export dnsmasq Records`
+3. `Reconcile Desired IPAM Intent` when you want to dry-run or apply IPAM links
+4. `Export dnsmasq Records`
 
 The endpoint evaluation consumes the latest stored node evaluation. This allows
 an actual node discovered by normalized name matching, such as desired `pcmain`
@@ -298,6 +299,15 @@ not considered DHCP-reservation-ready. `Export dnsmasq Records` consumes these
 deterministic facts to emit `dhcp-host=` lines only when the reservation is
 unambiguous.
 
+Run `Reconcile Desired IPAM Intent` to optionally reflect
+`DesiredEndpoint.ip_policy=dhcp_reserved` into Nautobot `IPAddress` rows. The
+Job defaults to dry-run and writes an `ipam-reconcile-summary.json` JobResult
+file. With `commit_changes` enabled, it can create a missing IPAddress or link
+an existing non-conflicting IPAddress to `DesiredEndpoint.realized_ip_address`.
+It does not overwrite existing IPAddress DNS names, assignment fields, or
+non-DHCP types; conflicts are logged and stored in endpoint evaluation
+`observed_facts.ipam_reconcile`.
+
 Initial recommended action examples:
 
 - `resolve_service_dependency`
@@ -337,6 +347,7 @@ boundary:
 - evaluation state: `IntentEvaluation.target_type`, `target_id`, `status`,
   `deterministic_summary`, `actual_refs`, `observed_facts`, `expected_facts`,
   `gap_summary`, `recommended_actions`
+- optional IPAM apply boundary: `Reconcile Desired IPAM Intent`
 - dnsmasq deployment input: JobResult files from `Export dnsmasq Records`
 
 For local checks that do not require Nautobot:

@@ -32,6 +32,7 @@ from .loaders import load_default_intent_sources, load_intent_sources
 
 try:
     from django.conf import settings
+    from django.db import transaction
     from django.utils import timezone
     from nautobot.dcim.models import Device
     from nautobot.ipam.models import IPAddress
@@ -47,6 +48,7 @@ try:
         IntentEvaluation,
         IntentSource,
     )
+    from .operations import plan_endpoint_ipam_reconcile
 except ImportError:  # pragma: no cover - Nautobot is not available in local unit tests.
     if importlib.util.find_spec("nautobot") is not None:
         raise
@@ -478,9 +480,12 @@ else:
                 "endpoint_type",
                 "name",
             )
+            ip_ranges = DesiredIPRange.objects.all().order_by("start_address", "end_address", "name")
             endpoint_list = list(endpoints)
+            ip_range_list = list(ip_ranges)
             export = export_dnsmasq_records(
                 endpoint_list,
+                ip_ranges=ip_range_list,
                 endpoint_evaluations=_latest_evaluations(ENDPOINT_TARGET_TYPE),
                 node_evaluations=_latest_evaluations(NODE_TARGET_TYPE),
                 include_skipped=include_skipped,
@@ -502,6 +507,8 @@ else:
                     {
                         "dns_records": len(export.dns_records),
                         "dhcp_reservations": len(export.dhcp_reservations),
+                        "dhcp_ranges": len(export.dhcp_ranges),
+                        "range_candidates": len(ip_range_list),
                         "skipped_details": len(export.skipped),
                     }
                 ),
@@ -509,6 +516,95 @@ else:
             self.logger.info("dnsmasq export files: dnsmasq-records.conf, dnsmasq-export.json")
             if include_skipped:
                 self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
+
+
+    class ReconcileDesiredIPAMIntent(Job):
+        """Optionally create or link Nautobot IPAddress rows from explicit endpoint IP intent."""
+
+        commit_changes = BooleanVar(
+            default=False,
+            description="Create/link Nautobot IPAddress rows. Leave disabled for dry-run.",
+        )
+        include_inactive = BooleanVar(
+            default=False,
+            description="Include endpoints attached to deprecated and retired DesiredNode rows.",
+        )
+
+        class Meta:
+            name = "Reconcile Desired IPAM Intent"
+            description = "Dry-run or apply DesiredEndpoint DHCP-reserved IP intent to Nautobot IPAddress rows."
+            has_sensitive_variables = False
+
+        def run(self, commit_changes: bool, include_inactive: bool) -> None:
+            endpoints = DesiredEndpoint.objects.select_related(
+                "desired_node",
+                "desired_node__realized_device",
+                "desired_node__realized_vm",
+                "realized_ip_address",
+            ).filter(ip_policy="dhcp_reserved").order_by("desired_node__slug", "endpoint_type", "name")
+            if not include_inactive:
+                endpoints = endpoints.exclude(desired_node__lifecycle__in=("deprecated", "retired"))
+
+            ip_candidates = list(IPAddress.objects.all().order_by("host", "mask_length"))
+            range_candidates = list(
+                DesiredIPRange.objects.exclude(lifecycle__in=("deprecated", "retired")).order_by(
+                    "start_address",
+                    "end_address",
+                    "name",
+                )
+            )
+            node_evaluations = _latest_evaluations(NODE_TARGET_TYPE)
+            counts = {
+                "commit_changes": bool(commit_changes),
+                "endpoints": 0,
+                "planned_ip_address_creates": 0,
+                "planned_ip_address_links": 0,
+                "created_ip_addresses": 0,
+                "linked_ip_addresses": 0,
+                "noop": 0,
+                "skipped": 0,
+                "conflicts": 0,
+                "evaluations_created": 0,
+                "evaluations_updated": 0,
+            }
+            plans = []
+
+            for desired_endpoint in endpoints:
+                counts["endpoints"] += 1
+                plan = plan_endpoint_ipam_reconcile(
+                    desired_endpoint,
+                    ip_candidates=ip_candidates,
+                    ip_address_model=IPAddress,
+                )
+                applied_plan = plan
+                if commit_changes and plan.action in {"create_ip_address", "link_ip_address"}:
+                    applied_plan = _apply_ipam_reconcile_plan(plan, desired_endpoint, IPAddress)
+                    if applied_plan.action == "create_ip_address_applied":
+                        ip_candidates = list(IPAddress.objects.all().order_by("host", "mask_length"))
+                    elif applied_plan.action == "link_ip_address_applied":
+                        desired_endpoint.refresh_from_db()
+
+                plan_data = applied_plan.as_dict()
+                plans.append(plan_data)
+                self.logger.info("IPAM reconcile action: %s", _json(plan_data))
+                _count_ipam_reconcile_action(counts, applied_plan.action)
+
+                desired_node = desired_endpoint.desired_node
+                payload = evaluate_endpoint_intent(
+                    desired_endpoint,
+                    ip_candidates=ip_candidates,
+                    range_candidates=range_candidates,
+                    node_evaluation=node_evaluations.get(str(desired_node.pk)),
+                )
+                payload.observed_facts["ipam_reconcile"] = plan_data
+                created = _upsert_evaluation(payload)
+                counts["evaluations_created" if created else "evaluations_updated"] += 1
+
+            self.create_file(
+                "ipam-reconcile-summary.json",
+                json.dumps({"summary": counts, "plans": plans}, sort_keys=True, indent=2, ensure_ascii=True) + "\n",
+            )
+            self.logger.info("Desired IPAM reconcile summary: %s", _json(counts))
 
     jobs = (
         PreviewIntentSourceAnalysis,
@@ -518,6 +614,7 @@ else:
         EvaluateEndpointIntent,
         EvaluateServiceIntent,
         ExportDnsmasqRecords,
+        ReconcileDesiredIPAMIntent,
     )
     register_jobs(*jobs)
 
@@ -551,6 +648,75 @@ def _latest_evaluations(target_type: str) -> dict:
     for evaluation in rows:
         evaluations.setdefault(str(evaluation.target_id), evaluation)
     return evaluations
+
+
+def _apply_ipam_reconcile_plan(plan, desired_endpoint, ip_address_model):
+    try:
+        with transaction.atomic():
+            if plan.action == "create_ip_address":
+                ip_address = ip_address_model(**plan.create_fields)
+                ip_address.full_clean()
+                ip_address.save()
+                desired_endpoint.realized_ip_address = ip_address
+                desired_endpoint.full_clean()
+                desired_endpoint.save(update_fields=["realized_ip_address"])
+                return plan.__class__(
+                    action="create_ip_address_applied",
+                    desired_endpoint=plan.desired_endpoint,
+                    desired_ip_address=plan.desired_ip_address,
+                    dns_name=plan.dns_name,
+                    reasons=["created_and_linked_ip_address"],
+                    existing_ip_address={
+                        "id": str(getattr(ip_address, "pk", "")),
+                        "address": plan.desired_ip_address,
+                        "dns_name": plan.dns_name,
+                        "type": str(plan.create_fields.get("type", "")),
+                    },
+                    create_fields=plan.create_fields,
+                )
+
+            if plan.action == "link_ip_address":
+                ip_address_id = plan.existing_ip_address.get("id") if plan.existing_ip_address else ""
+                ip_address = ip_address_model.objects.get(pk=ip_address_id)
+                desired_endpoint.realized_ip_address = ip_address
+                desired_endpoint.full_clean()
+                desired_endpoint.save(update_fields=["realized_ip_address"])
+                return plan.__class__(
+                    action="link_ip_address_applied",
+                    desired_endpoint=plan.desired_endpoint,
+                    desired_ip_address=plan.desired_ip_address,
+                    dns_name=plan.dns_name,
+                    reasons=["linked_existing_ip_address"],
+                    existing_ip_address=plan.existing_ip_address,
+                )
+    except Exception as exc:
+        return plan.__class__(
+            action="conflict",
+            desired_endpoint=plan.desired_endpoint,
+            desired_ip_address=plan.desired_ip_address,
+            dns_name=plan.dns_name,
+            reasons=[*plan.reasons, "apply_failed", f"{exc.__class__.__name__}: {exc}"],
+            existing_ip_address=plan.existing_ip_address,
+            create_fields=plan.create_fields,
+        )
+    return plan
+
+
+def _count_ipam_reconcile_action(counts: dict, action: str) -> None:
+    if action == "create_ip_address":
+        counts["planned_ip_address_creates"] += 1
+    elif action == "link_ip_address":
+        counts["planned_ip_address_links"] += 1
+    elif action == "create_ip_address_applied":
+        counts["created_ip_addresses"] += 1
+    elif action == "link_ip_address_applied":
+        counts["linked_ip_addresses"] += 1
+    elif action == "noop":
+        counts["noop"] += 1
+    elif action == "skip":
+        counts["skipped"] += 1
+    elif action == "conflict":
+        counts["conflicts"] += 1
 
 
 def _entry_from_intent_source(intent_source) -> IntentSourceEntry:

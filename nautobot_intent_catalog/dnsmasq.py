@@ -1,4 +1,4 @@
-"""Deterministic dnsmasq export helpers for desired endpoints."""
+"""Deterministic dnsmasq export helpers for desired endpoints and ranges."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 ELIGIBLE_NODE_LIFECYCLES = frozenset({"planned", "approved", "active"})
 ELIGIBLE_ENDPOINT_TYPES = frozenset({"primary", "management", "service", "vpn"})
 SUPPORTED_RECORD_TYPES = frozenset({"host_record", "address", "cname"})
-DNSMASQ_EXPORT_SCHEMA_VERSION = "2.0"
+DNSMASQ_EXPORT_SCHEMA_VERSION = "3.0"
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class DnsmasqExport:
     summary: dict[str, Any]
     dns_records: list[dict[str, Any]]
     dhcp_reservations: list[dict[str, Any]]
+    dhcp_ranges: list[dict[str, Any]]
     skipped: list[dict[str, Any]]
 
     def as_dict(self) -> dict[str, Any]:
@@ -29,6 +30,7 @@ class DnsmasqExport:
             "summary": self.summary,
             "dns_records": self.dns_records,
             "dhcp_reservations": self.dhcp_reservations,
+            "dhcp_ranges": self.dhcp_ranges,
             "skipped": self.skipped,
         }
 
@@ -36,18 +38,22 @@ class DnsmasqExport:
 def export_dnsmasq_records(
     endpoints: Iterable[Any],
     *,
+    ip_ranges: Iterable[Any] = (),
     endpoint_evaluations: Mapping[str, Any] | None = None,
     node_evaluations: Mapping[str, Any] | None = None,
     include_skipped: bool = True,
 ) -> DnsmasqExport:
-    """Return deterministic DNS records and DHCP reservations for desired endpoints."""
+    """Return deterministic DNS records, DHCP reservations, and DHCP ranges."""
 
     dns_records: list[dict[str, Any]] = []
     dhcp_reservations: list[dict[str, Any]] = []
+    dhcp_ranges: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     dns_skipped_count = 0
     dhcp_skipped_count = 0
+    range_skipped_count = 0
     total_count = 0
+    total_range_count = 0
 
     for endpoint in endpoints:
         total_count += 1
@@ -74,13 +80,28 @@ def export_dnsmasq_records(
         else:
             dhcp_reservations.append(reservation)
 
+    for ip_range in ip_ranges:
+        total_range_count += 1
+        range_entry = _dhcp_range_entry(ip_range)
+        if range_entry["skip_reasons"]:
+            range_skipped_count += 1
+            if include_skipped:
+                skipped.append(_range_skip_entry(ip_range, range_entry["skip_reasons"]))
+        else:
+            dhcp_ranges.append(range_entry)
+
     dns_records.sort(key=_dns_record_sort_key)
     dhcp_reservations.sort(key=_dhcp_reservation_sort_key)
+    dhcp_ranges.sort(key=_dhcp_range_sort_key)
     skipped.sort(key=_skip_sort_key)
+    skipped_endpoint_details = sum(1 for entry in skipped if entry.get("item_type") in {"dns_record", "dhcp_reservation"})
+    skipped_range_details = sum(1 for entry in skipped if entry.get("item_type") == "dhcp_range")
     summary = {
         "dns_records": len(dns_records),
         "dhcp_reservations": len(dhcp_reservations),
+        "dhcp_ranges": len(dhcp_ranges),
         "eligible_endpoints": len(dns_records),
+        "eligible_ranges": len(dhcp_ranges),
         "record_types": {
             "address": sum(1 for record in dns_records if record["record_type"] == "address"),
             "cname": sum(1 for record in dns_records if record["record_type"] == "cname"),
@@ -89,16 +110,21 @@ def export_dnsmasq_records(
         "skipped": {
             "details": len(skipped),
             "dhcp_reservations": dhcp_skipped_count,
+            "dhcp_ranges": range_skipped_count,
             "dns_records": dns_skipped_count,
         },
-        "skipped_endpoint_details": len(skipped),
+        "skipped_endpoint_details": skipped_endpoint_details,
         "skipped_endpoints": dns_skipped_count,
+        "skipped_range_details": skipped_range_details,
+        "skipped_ranges": range_skipped_count,
         "total_endpoints": total_count,
+        "total_ranges": total_range_count,
     }
     return DnsmasqExport(
         summary=summary,
         dns_records=dns_records,
         dhcp_reservations=dhcp_reservations,
+        dhcp_ranges=dhcp_ranges,
         skipped=skipped,
     )
 
@@ -186,6 +212,7 @@ def render_dnsmasq_records_conf(
         lines.append(f"# job_result_id: {job_result_id}")
     lines.extend(record["line"] for record in export.dns_records)
     lines.extend(reservation["line"] for reservation in export.dhcp_reservations)
+    lines.extend(ip_range["line"] for ip_range in export.dhcp_ranges)
     return "\n".join(lines) + "\n"
 
 
@@ -204,6 +231,7 @@ def dnsmasq_export_payload(
         "summary": export.summary,
         "dns_records": export.dns_records,
         "dhcp_reservations": export.dhcp_reservations,
+        "dhcp_ranges": export.dhcp_ranges,
         "skipped": export.skipped,
     }
 
@@ -300,6 +328,61 @@ def _dns_record_entry(endpoint: Any) -> dict[str, Any]:
     }
 
 
+def _dhcp_range_entry(ip_range: Any) -> dict[str, Any]:
+    start_address = _range_host_address(getattr(ip_range, "start_address", None))
+    end_address = _range_host_address(getattr(ip_range, "end_address", None))
+    dnsmasq_options = _mapping(getattr(ip_range, "dnsmasq_options", None))
+    lease_time = _text(dnsmasq_options.get("lease_time"))
+    skip_reasons = _dhcp_range_skip_reasons(ip_range, start_address=start_address, end_address=end_address)
+    line_parts = ["dhcp-range", start_address, end_address]
+    line = ""
+    if lease_time:
+        line_parts.append(lease_time)
+    if not skip_reasons:
+        line = f"{line_parts[0]}={','.join(line_parts[1:])}"
+    return {
+        "desired_ip_range": _text(getattr(ip_range, "name", None)),
+        "desired_ip_range_id": _pk(ip_range),
+        "dnsmasq_options": dnsmasq_options,
+        "end_address": end_address,
+        "generate_dnsmasq": bool(getattr(ip_range, "generate_dnsmasq", False)),
+        "lease_time": lease_time,
+        "lifecycle": _text(getattr(ip_range, "lifecycle", None)),
+        "line": line,
+        "range_policy": _text(getattr(ip_range, "range_policy", None)),
+        "skip_reasons": sorted(set(skip_reasons)),
+        "slug": _text(getattr(ip_range, "slug", None)),
+        "start_address": start_address,
+    }
+
+
+def _dhcp_range_skip_reasons(ip_range: Any, *, start_address: str, end_address: str) -> list[str]:
+    reasons = []
+    lifecycle = _text(getattr(ip_range, "lifecycle", None))
+    range_policy = _text(getattr(ip_range, "range_policy", None))
+    if not bool(getattr(ip_range, "generate_dnsmasq", False)):
+        reasons.append("generate_dnsmasq_false")
+    if lifecycle not in ELIGIBLE_NODE_LIFECYCLES:
+        reasons.append("range_lifecycle_not_exportable")
+    if range_policy != "dhcp_dynamic_pool":
+        reasons.append("range_policy_not_dhcp_dynamic_pool")
+    if not start_address:
+        reasons.append("invalid_start_address")
+    if not end_address:
+        reasons.append("invalid_end_address")
+    if start_address and end_address:
+        try:
+            start_ip = ip_interface(start_address).ip
+            end_ip = ip_interface(end_address).ip
+            if start_ip.version != end_ip.version:
+                reasons.append("address_family_mismatch")
+            elif int(start_ip) > int(end_ip):
+                reasons.append("range_start_after_end")
+        except ValueError:
+            reasons.append("invalid_range_address")
+    return reasons
+
+
 def _skip_entry(endpoint: Any, item_type: str, reasons: list[str]) -> dict[str, Any]:
     desired_node = getattr(endpoint, "desired_node", None)
     return {
@@ -313,6 +396,23 @@ def _skip_entry(endpoint: Any, item_type: str, reasons: list[str]) -> dict[str, 
         "ip_policy": _text(getattr(endpoint, "ip_policy", None)),
         "item_type": item_type,
         "reasons": sorted(set(reasons)),
+    }
+
+
+def _range_skip_entry(ip_range: Any, reasons: list[str]) -> dict[str, Any]:
+    return {
+        "desired_ip_range": _text(getattr(ip_range, "name", None)),
+        "desired_ip_range_id": _pk(ip_range),
+        "dns_name": "",
+        "endpoint_name": "",
+        "endpoint_type": "",
+        "desired_node_slug": "",
+        "item_type": "dhcp_range",
+        "range_policy": _text(getattr(ip_range, "range_policy", None)),
+        "reasons": sorted(set(reasons)),
+        "slug": _text(getattr(ip_range, "slug", None)),
+        "start_address": _range_host_address(getattr(ip_range, "start_address", None)),
+        "end_address": _range_host_address(getattr(ip_range, "end_address", None)),
     }
 
 
@@ -370,6 +470,16 @@ def _host_address(value: str) -> str:
         return value.split("/", maxsplit=1)[0]
 
 
+def _range_host_address(value: Any) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    try:
+        return str(ip_interface(text).ip)
+    except ValueError:
+        return ""
+
+
 def _normalize_mac(value: Any) -> str:
     text = re.sub(r"[^0-9A-Fa-f]", "", _text(value))
     if len(text) != 12:
@@ -415,11 +525,19 @@ def _dhcp_reservation_sort_key(reservation: dict[str, Any]) -> tuple[str, str, s
     )
 
 
+def _dhcp_range_sort_key(ip_range: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        ip_range["start_address"],
+        ip_range["end_address"],
+        ip_range["slug"],
+    )
+
+
 def _skip_sort_key(entry: dict[str, Any]) -> tuple[str, str, str, str, str]:
     return (
-        entry["item_type"],
-        entry["dns_name"],
-        entry["desired_node_slug"],
-        entry["endpoint_type"],
-        entry["endpoint_name"],
+        _text(entry.get("item_type")),
+        _text(entry.get("dns_name") or entry.get("start_address")),
+        _text(entry.get("desired_node_slug") or entry.get("slug")),
+        _text(entry.get("endpoint_type") or entry.get("range_policy")),
+        _text(entry.get("endpoint_name") or entry.get("desired_ip_range")),
     )
