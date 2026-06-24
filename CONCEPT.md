@@ -11,7 +11,8 @@ Intent Catalog separates desired state into a few layers:
 - `IntentSource`: where desired state came from.
 - `DesiredService`: a logical service or workload that should exist.
 - `DesiredDependency`: another service or resource a desired service needs.
-- `DesiredNode`: a desired host, VM, device, container, or other node.
+- `DesiredNode`: a desired node intent, classified separately from the actual
+  Nautobot object types that may realize it.
 - `DesiredEndpoint`: a desired IP/DNS/port-facing endpoint on a node.
 - `IntentEvaluation`: persisted desired-vs-actual review data.
 
@@ -107,8 +108,18 @@ dependency is satisfied.
 
 ## DesiredNode
 
-`DesiredNode` represents a desired node-level object: a physical device, VM,
-container, service host, network object, or similar managed unit.
+`DesiredNode` represents a desired node-level intent. It describes what kind of
+node the catalog wants, not just which Nautobot model should be linked to it.
+
+Two fields carry that split:
+
+- `node_type`: the desired node classification inside Intent Catalog.
+- `accepted_actual_types`: the Nautobot object types that may realize the node.
+
+Allowed `accepted_actual_types` values are currently `device`,
+`virtual_machine`, and `container`. `container` can be expressed as intent now,
+but actual candidate discovery is not added until the Nautobot-side container
+model is chosen.
 
 Examples:
 
@@ -130,12 +141,16 @@ desired_nodes:
   - name: proxmox-01
     slug: proxmox-01
     node_type: device
+    accepted_actual_types:
+      - device
     lifecycle: active
     role: hypervisor
 
   - name: vm-git-01
     slug: vm-git-01
     node_type: virtual_machine
+    accepted_actual_types:
+      - virtual_machine
     lifecycle: active
     role: git
     expected_spec:
@@ -148,6 +163,27 @@ The current schema does not yet have a typed `parent_node` or `placement_node`
 relationship. Placement can be carried in `expected_spec` for now. A future
 self-referential relationship would be a natural extension if placement becomes
 important enough to query directly.
+
+A service host may intentionally allow several actual implementations. For
+example, a `dnsmasq` node can be classified as a service host while accepting a
+physical device, VM, or container as its realization:
+
+```yaml
+desired_nodes:
+  - name: dnsmasq-main
+    slug: dnsmasq-main
+    node_type: service_host
+    accepted_actual_types:
+      - device
+      - virtual_machine
+      - container
+    lifecycle: active
+    role: dnsmasq
+    expected_spec:
+      availability: always_on
+      services:
+        - dnsmasq
+```
 
 ## DesiredEndpoint
 
@@ -168,6 +204,8 @@ desired_nodes:
   - name: vm-01
     slug: vm-01
     node_type: virtual_machine
+    accepted_actual_types:
+      - virtual_machine
     lifecycle: active
 
 desired_endpoints:

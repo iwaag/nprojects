@@ -24,6 +24,10 @@
                         <td>{{ object.get_node_type_display|default:object.node_type }}</td>
                     </tr>
                     <tr>
+                        <th scope="row">Accepted Actual Types</th>
+                        <td>{{ object.accepted_actual_types|default:"-" }}</td>
+                    </tr>
+                    <tr>
                         <th scope="row">Lifecycle</th>
                         <td>{{ object.get_lifecycle_display|default:object.lifecycle }}</td>
                     </tr>

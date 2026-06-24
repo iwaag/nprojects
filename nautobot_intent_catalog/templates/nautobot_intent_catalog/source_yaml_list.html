@@ -94,6 +94,7 @@
                                 <th>Name</th>
                                 <th>Slug</th>
                                 <th>Type</th>
+                                <th>Accepted Actual Types</th>
                                 <th>Lifecycle</th>
                                 <th>Role</th>
                                 <th>Intent Source</th>
@@ -105,6 +106,7 @@
                                     <td>{{ desired_node.name }}</td>
                                     <td><code>{{ desired_node.slug }}</code></td>
                                     <td>{{ desired_node.node_type }}</td>
+                                    <td>{{ desired_node.accepted_actual_types|join:", " }}</td>
                                     <td>{{ desired_node.lifecycle }}</td>
                                     <td>{{ desired_node.role|default:"-" }}</td>
                                     <td>{{ desired_node.intent_source|default:"-" }}</td>

@@ -29,6 +29,7 @@ else:
             choices=DesiredNode.NODE_TYPE_CHOICES,
             initial=DesiredNode.NODE_TYPE_VIRTUAL_MACHINE,
         )
+        accepted_actual_types = forms.JSONField(required=False, widget=forms.HiddenInput)
         lifecycle = forms.ChoiceField(
             choices=DesiredNode.LIFECYCLE_CHOICES,
             initial=DesiredNode.LIFECYCLE_PLANNED,
@@ -81,6 +82,7 @@ else:
                 "name": self.cleaned_data["name"],
                 "slug": self.cleaned_data["slug"],
                 "node_type": self.cleaned_data["node_type"],
+                "accepted_actual_types": self.cleaned_data.get("accepted_actual_types"),
                 "lifecycle": self.cleaned_data["lifecycle"],
                 "role": self.cleaned_data.get("role"),
                 "description": self.cleaned_data.get("description"),

@@ -184,6 +184,7 @@ def evaluate_node_intent(
     """Compare a DesiredNode-like object with actual Device/VM-like candidates."""
 
     expected = _expected_node_facts(desired_node)
+    accepted_actual_types = set(expected["accepted_actual_types"])
     realized = _realized_node_objects(desired_node)
     actual_refs: list[dict[str, Any]] = []
     observed: dict[str, Any] = {"candidates": []}
@@ -200,7 +201,18 @@ def evaluate_node_intent(
         actual_refs = [_actual_ref(object_type, actual)]
         actual_facts = _actual_node_facts(object_type, actual)
         observed["actual"] = actual_facts
-        gaps.extend(_node_mismatches(expected, actual_facts))
+        actual_type = _actual_type_for_object_type(object_type)
+        if actual_type not in accepted_actual_types:
+            gaps.append(
+                {
+                    "code": "realized_actual_type_not_accepted",
+                    "severity": "conflict",
+                    "expected": expected["accepted_actual_types"],
+                    "actual": actual_type,
+                }
+            )
+        else:
+            gaps.extend(_node_mismatches(expected, actual_facts))
         status = "conflict" if gaps else "satisfied"
     else:
         candidates = _rank_node_candidates(
@@ -216,7 +228,10 @@ def evaluate_node_intent(
                 {
                     "action": "link_desired_node_to_actual",
                     "target": _target_ref(desired_node),
-                    "reason": "No deterministic Device or VirtualMachine candidate was found.",
+                    "reason": (
+                        "No deterministic candidate was found for accepted actual types: "
+                        f"{', '.join(expected['accepted_actual_types'])}."
+                    ),
                     "requires_review": True,
                 }
             )
@@ -255,6 +270,7 @@ def evaluate_node_intent(
         "gap_codes": [gap["code"] for gap in gaps],
         "actual_ref_count": len(actual_refs),
         "candidate_count": len(observed.get("candidates") or []),
+        "accepted_actual_types": expected["accepted_actual_types"],
         "evaluation_scope": "node_identity_and_primary_facts",
     }
     return _payload(
@@ -533,6 +549,7 @@ def _expected_node_facts(desired_node: Any) -> dict[str, Any]:
         "name": _text(getattr(desired_node, "name", None)),
         "slug": _text(getattr(desired_node, "slug", None)),
         "node_type": _text(getattr(desired_node, "node_type", None)),
+        "accepted_actual_types": _accepted_actual_types_for_node(desired_node),
         "lifecycle": _text(getattr(desired_node, "lifecycle", None)),
         "role": _text(getattr(desired_node, "role", None)),
         "expected_spec": expected_spec,
@@ -595,6 +612,38 @@ def _realized_node_objects(desired_node: Any) -> list[tuple[str, Any]]:
     return realized
 
 
+def _accepted_actual_types_for_node(desired_node: Any) -> list[str]:
+    raw_actual_types = getattr(desired_node, "accepted_actual_types", None)
+    if raw_actual_types is None:
+        raw_actual_types = []
+
+    allowed = {"device", "virtual_machine", "container"}
+    actual_types = []
+    if isinstance(raw_actual_types, list):
+        for item in raw_actual_types:
+            normalized = _text(item).strip().lower().replace("-", "_")
+            if normalized in allowed and normalized not in actual_types:
+                actual_types.append(normalized)
+    if actual_types:
+        return actual_types
+
+    node_type = _text(getattr(desired_node, "node_type", None)).strip().lower().replace("-", "_")
+    defaults = {
+        "device": ["device"],
+        "virtual_machine": ["virtual_machine"],
+        "container": ["container"],
+        "service_host": ["device", "virtual_machine", "container"],
+    }
+    return list(defaults.get(node_type, ["device"]))
+
+
+def _actual_type_for_object_type(object_type: str) -> str | None:
+    return {
+        "dcim.device": "device",
+        "virtualization.virtualmachine": "virtual_machine",
+    }.get(object_type)
+
+
 def _rank_node_candidates(
     desired_node: Any,
     *,
@@ -602,11 +651,15 @@ def _rank_node_candidates(
     vm_candidates: Iterable[Any],
 ) -> list[dict[str, Any]]:
     expected = _expected_node_facts(desired_node)
+    accepted_actual_types = set(expected["accepted_actual_types"])
     candidates = []
-    for object_type, actual in [
-        *[("dcim.device", device) for device in device_candidates],
-        *[("virtualization.virtualmachine", vm) for vm in vm_candidates],
-    ]:
+    candidate_sources = []
+    if "device" in accepted_actual_types:
+        candidate_sources.extend(("dcim.device", device) for device in device_candidates)
+    if "virtual_machine" in accepted_actual_types:
+        candidate_sources.extend(("virtualization.virtualmachine", vm) for vm in vm_candidates)
+
+    for object_type, actual in candidate_sources:
         facts = _actual_node_facts(object_type, actual)
         score, reasons = _node_candidate_score(expected, facts)
         candidates.append(

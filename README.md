@@ -132,6 +132,16 @@ desired_nodes:
       - device
     lifecycle: active
 
+  - name: dnsmasq-main
+    slug: dnsmasq-main
+    node_type: service_host
+    accepted_actual_types:
+      - device
+      - virtual_machine
+      - container
+    lifecycle: active
+    role: dnsmasq
+
 desired_endpoints:
   - name: primary
     desired_node: pcmain
@@ -145,6 +155,11 @@ This imports the endpoint with `dns_name: pcmain.home.arpa` and
 `mdns_name: pcmain.local`. Explicit YAML values are preserved. Non-primary
 endpoints are not auto-filled.
 
+Raw YAML desired node input separates the desired node classification from the
+acceptable Nautobot object types that may realize it. Use `node_type` for the
+intent catalog classification and `accepted_actual_types` for candidate matching
+and explicit realized-object validation.
+
 Manual conversion from an older YAML shape is intentionally mechanical: rename
 the top-level list key to `intent_sources` and keep each item field that still
 applies. Fields such as `catalog_paths`, `basic_file_paths`, and
@@ -155,25 +170,6 @@ in the same YAML input. Missing node references are reported as deterministic
 validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
 intent can be captured before a Nautobot `IPAddress` exists; actual state is
 linked separately through `realized_ip_address`.
-
-Raw YAML desired node input separates the desired node classification from the
-acceptable Nautobot object types that may realize it. Use `node_type` for the
-intent catalog classification and `accepted_actual_types` for candidate matching
-and explicit realized-object validation. For example, a service host that may
-run on a physical device, VM, or container can use:
-
-```yaml
-desired_nodes:
-  - name: dnsmasq-main
-    slug: dnsmasq-main
-    node_type: service_host
-    accepted_actual_types:
-      - device
-      - virtual_machine
-      - container
-    lifecycle: active
-    role: dnsmasq
-```
 
 ## Quick Host Add
 
@@ -304,14 +300,16 @@ consume the deterministic fields first and write generated review output only to
 
 Run `Evaluate Node Intent` to compare `DesiredNode` rows with actual Nautobot
 `Device` and `VirtualMachine` rows. Explicit `realized_device` or `realized_vm`
-links are authoritative and are evaluated before candidate discovery. Unlinked
-nodes are matched deterministically by hostname/name, serial or UUID, and
-platform or OS hints from `expected_spec` and actual object fields/custom
-fields. Built-in home-lab suffixes are normalized for name comparison, so
-`pcmain` and `pcmain.local` are treated as the same node identity while
-unrelated FQDNs such as `db01.prod.example.com` are not collapsed to `db01`.
-Ambiguous matches are not adopted automatically; they are stored as `conflict`
-evaluations with review-required actions.
+links are authoritative and are evaluated before candidate discovery, but a
+link to an object type outside `accepted_actual_types` is a conflict. Unlinked
+nodes are matched only against accepted actual types and then ranked
+deterministically by hostname/name, serial or UUID, and platform or OS hints
+from `expected_spec` and actual object fields/custom fields. Built-in home-lab
+suffixes are normalized for name comparison, so `pcmain` and `pcmain.local` are
+treated as the same node identity while unrelated FQDNs such as
+`db01.prod.example.com` are not collapsed to `db01`. Ambiguous matches are not
+adopted automatically; they are stored as `conflict` evaluations with
+review-required actions.
 
 Run `Evaluate Endpoint Intent` to compare `DesiredEndpoint` rows with
 `IPAddress` rows and interface facts from the related realized node or the

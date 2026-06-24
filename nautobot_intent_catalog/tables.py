@@ -148,6 +148,7 @@ else:
                 "pk",
                 "name",
                 "node_type",
+                "accepted_actual_types",
                 "lifecycle",
                 "role",
                 "intent_source",

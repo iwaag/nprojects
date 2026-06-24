@@ -174,6 +174,62 @@ class NodeEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "actual_node_not_linked")
         self.assertTrue(payload.recommended_actions[0]["requires_review"])
 
+    def test_device_only_node_does_not_adopt_vm_candidate(self) -> None:
+        payload = evaluate_node_intent(
+            node(name="edge-1", slug="edge-1", accepted_actual_types=["device"]),
+            vm_candidates=[actual_node(name="edge-1")],
+        )
+
+        self.assertEqual(payload.status, "missing")
+        self.assertEqual(payload.actual_refs, [])
+        self.assertEqual(payload.observed_facts["candidates"], [])
+        self.assertEqual(payload.expected_facts["accepted_actual_types"], ["device"])
+
+    def test_virtual_machine_only_node_does_not_adopt_device_candidate(self) -> None:
+        payload = evaluate_node_intent(
+            node(
+                name="edge-1",
+                slug="edge-1",
+                node_type="virtual_machine",
+                accepted_actual_types=["virtual_machine"],
+            ),
+            device_candidates=[actual_node(name="edge-1")],
+        )
+
+        self.assertEqual(payload.status, "missing")
+        self.assertEqual(payload.actual_refs, [])
+        self.assertEqual(payload.observed_facts["candidates"], [])
+
+    def test_multiple_accepted_actual_types_allow_device_and_vm_candidates(self) -> None:
+        payload = evaluate_node_intent(
+            node(
+                name="edge-1",
+                slug="edge-1",
+                node_type="service_host",
+                accepted_actual_types=["device", "virtual_machine"],
+            ),
+            device_candidates=[actual_node(pk="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name="edge-1")],
+            vm_candidates=[actual_node(pk="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name="edge-1")],
+        )
+
+        self.assertEqual(payload.status, "conflict")
+        self.assertEqual(
+            {candidate["actual_ref"]["object_type"] for candidate in payload.observed_facts["candidates"]},
+            {"dcim.device", "virtualization.virtualmachine"},
+        )
+
+    def test_realized_link_outside_accepted_actual_types_is_conflict(self) -> None:
+        payload = evaluate_node_intent(
+            node(
+                node_type="virtual_machine",
+                accepted_actual_types=["virtual_machine"],
+                realized_device=actual_node(name="edge-1"),
+            )
+        )
+
+        self.assertEqual(payload.status, "conflict")
+        self.assertEqual(payload.gap_summary["gaps"][0]["code"], "realized_actual_type_not_accepted")
+
     def test_name_normalized_candidate_is_partial_and_requires_review(self) -> None:
         payload = evaluate_node_intent(
             node(name="pc1", slug="pc1"),
