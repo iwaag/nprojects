@@ -4,9 +4,15 @@ from types import SimpleNamespace
 import unittest
 
 from nautobot_intent_catalog.evaluations import (
+    classify_endpoint_ip_ranges,
     evaluate_endpoint_intent,
     evaluate_node_intent,
     evaluate_service_intent,
+    invalid_desired_ip_ranges,
+    matching_desired_ip_ranges,
+    normalize_desired_range_addresses,
+    normalize_endpoint_ip_string,
+    overlapping_desired_ip_ranges,
 )
 
 
@@ -41,6 +47,21 @@ def endpoint(**overrides):
         "dnsmasq_record_type": "host_record",
         "desired_node": node(),
         "realized_ip_address": None,
+    }
+    data.update(overrides)
+    return obj(**data)
+
+
+def ip_range(**overrides):
+    data = {
+        "pk": "44444444-4444-4444-4444-444444444444",
+        "name": "home-dynamic-dhcp",
+        "slug": "home-dynamic-dhcp",
+        "start_address": "192.168.0.200",
+        "end_address": "192.168.0.250",
+        "range_policy": "dhcp_dynamic_pool",
+        "lifecycle": "active",
+        "generate_dnsmasq": True,
     }
     data.update(overrides)
     return obj(**data)
@@ -203,6 +224,102 @@ class NodeEvaluationTests(unittest.TestCase):
 
         self.assertEqual(payload.status, "conflict")
         self.assertEqual(payload.gap_summary["gaps"][0]["code"], "ambiguous_actual_node_candidates")
+
+
+class IPRangeClassificationTests(unittest.TestCase):
+    def test_endpoint_ip_and_range_addresses_are_normalized_to_hosts(self) -> None:
+        desired_range = ip_range(start_address="192.168.0.200/24", end_address="192.168.0.250/24")
+
+        self.assertEqual(normalize_endpoint_ip_string("192.168.0.210/24"), "192.168.0.210")
+        self.assertEqual(
+            normalize_desired_range_addresses(desired_range),
+            {
+                "start_address": "192.168.0.200",
+                "end_address": "192.168.0.250",
+                "valid": True,
+                "errors": [],
+            },
+        )
+
+    def test_ipv4_endpoint_range_matches_are_deterministically_sorted(self) -> None:
+        broad = ip_range(
+            pk="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            name="broad",
+            slug="broad",
+            start_address="192.168.0.1",
+            end_address="192.168.0.254",
+            range_policy="static_pool",
+        )
+        narrow = ip_range(
+            pk="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            name="reserved",
+            slug="reserved",
+            start_address="192.168.0.100",
+            end_address="192.168.0.199",
+            range_policy="dhcp_reservable_pool",
+        )
+
+        matches = matching_desired_ip_ranges("192.168.0.120/24", [narrow, broad])
+
+        self.assertEqual([match["slug"] for match in matches], ["broad", "reserved"])
+        self.assertEqual(matches[0]["start_address"], "192.168.0.1")
+        self.assertEqual(matches[1]["range_policy"], "dhcp_reservable_pool")
+
+    def test_invalid_endpoint_ip_does_not_raise(self) -> None:
+        classification = classify_endpoint_ip_ranges("not-an-ip", [ip_range()])
+
+        self.assertFalse(classification["endpoint_ip_valid"])
+        self.assertEqual(classification["endpoint_ip"], "not-an-ip")
+        self.assertEqual(classification["matching_ranges"], [])
+        self.assertEqual(classification["invalid_ranges"], [])
+
+    def test_invalid_range_definitions_are_reported(self) -> None:
+        invalids = invalid_desired_ip_ranges(
+            [
+                ip_range(name="bad-start", slug="bad-start", start_address="not-an-ip"),
+                ip_range(name="reversed", slug="reversed", start_address="192.168.0.250", end_address="192.168.0.200"),
+                ip_range(name="mixed", slug="mixed", start_address="192.168.0.1", end_address="2001:db8::1"),
+            ]
+        )
+
+        errors_by_slug = {entry["slug"]: entry["errors"] for entry in invalids}
+        self.assertEqual(errors_by_slug["bad-start"], ["invalid_start_address"])
+        self.assertEqual(errors_by_slug["reversed"], ["range_start_after_end"])
+        self.assertEqual(errors_by_slug["mixed"], ["address_family_mismatch"])
+
+    def test_overlapping_matching_ranges_are_detected(self) -> None:
+        first = ip_range(
+            pk="11111111-1111-1111-1111-111111111111",
+            name="reservable",
+            slug="reservable",
+            start_address="192.168.0.100",
+            end_address="192.168.0.180",
+            range_policy="dhcp_reservable_pool",
+        )
+        second = ip_range(
+            pk="22222222-2222-2222-2222-222222222222",
+            name="dynamic",
+            slug="dynamic",
+            start_address="192.168.0.150",
+            end_address="192.168.0.220",
+            range_policy="dhcp_dynamic_pool",
+        )
+        third = ip_range(
+            pk="33333333-3333-3333-3333-333333333333",
+            name="other",
+            slug="other",
+            start_address="192.168.1.10",
+            end_address="192.168.1.20",
+        )
+
+        classification = classify_endpoint_ip_ranges("192.168.0.160", [third, second, first])
+        overlaps = overlapping_desired_ip_ranges([third, second, first])
+
+        self.assertEqual([match["slug"] for match in classification["matching_ranges"]], ["reservable", "dynamic"])
+        self.assertEqual(len(classification["overlapping_matching_ranges"]), 1)
+        self.assertEqual(classification["overlapping_matching_ranges"][0]["overlap_start_address"], "192.168.0.150")
+        self.assertEqual(classification["overlapping_matching_ranges"][0]["overlap_end_address"], "192.168.0.180")
+        self.assertEqual(len(overlaps), 1)
 
 
 class EndpointEvaluationTests(unittest.TestCase):
