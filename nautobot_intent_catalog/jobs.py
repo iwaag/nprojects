@@ -389,13 +389,27 @@ else:
                 endpoints = endpoints.exclude(desired_node__lifecycle__in=("deprecated", "retired"))
 
             ip_candidates = list(IPAddress.objects.all().order_by("host", "mask_length"))
+            range_candidates = list(
+                DesiredIPRange.objects.exclude(lifecycle__in=("deprecated", "retired")).order_by(
+                    "start_address",
+                    "end_address",
+                    "name",
+                )
+            )
             node_evaluations = _latest_evaluations(NODE_TARGET_TYPE)
-            counts = {"evaluated": 0, "created": 0, "updated": 0, "statuses": {}}
+            counts = {
+                "evaluated": 0,
+                "created": 0,
+                "updated": 0,
+                "range_candidates": len(range_candidates),
+                "statuses": {},
+            }
             for desired_endpoint in endpoints:
                 desired_node = desired_endpoint.desired_node
                 payload = evaluate_endpoint_intent(
                     desired_endpoint,
                     ip_candidates=ip_candidates,
+                    range_candidates=range_candidates,
                     node_evaluation=node_evaluations.get(str(desired_node.pk)),
                 )
                 created = _upsert_evaluation(payload)

@@ -274,6 +274,7 @@ def evaluate_endpoint_intent(
     desired_endpoint: Any,
     *,
     ip_candidates: Iterable[Any] = (),
+    range_candidates: Iterable[Any] | None = None,
     node_evaluation: EvaluationPayload | dict[str, Any] | None = None,
 ) -> EvaluationPayload:
     """Compare a DesiredEndpoint-like object with actual IP and interface facts."""
@@ -327,6 +328,12 @@ def evaluate_endpoint_intent(
         elif len(matches) > 1:
             gaps.append({"code": "ambiguous_ip_address_candidates", "severity": "conflict"})
 
+    if range_candidates is not None:
+        range_classification = classify_endpoint_ip_ranges(expected.get("ip_address"), range_candidates)
+        observed["ip_policy_range_classification"] = range_classification
+        observed["matching_ip_policy_ranges"] = range_classification["matching_ranges"]
+        gaps.extend(_ip_policy_range_gaps(expected, range_classification))
+
     interface_candidates = _interface_candidates_for_endpoint(desired_endpoint, node_evaluation)
     observed["interface_candidates"] = interface_candidates
     mac_candidates = [candidate for candidate in interface_candidates if candidate.get("mac_address")]
@@ -355,9 +362,21 @@ def evaluate_endpoint_intent(
     else:
         status = "satisfied"
 
-    dhcp_blocking_gap_codes = {"ambiguous_interface", "missing_mac_address", "missing_interface_candidate"}
+    dhcp_blocking_gap_codes = {
+        "ambiguous_interface",
+        "missing_mac_address",
+        "missing_interface_candidate",
+        "missing_ip_policy_range",
+        "ambiguous_ip_policy_range",
+        "ip_policy_range_mismatch",
+        "invalid_ip_policy_range",
+        "static_endpoint_in_dhcp_pool",
+        "dhcp_reserved_endpoint_in_dynamic_pool",
+    }
     dhcp_reservation_ready = (
-        len(mac_candidates) == 1
+        expected.get("ip_policy") == "dhcp_reserved"
+        and bool(_text(expected.get("ip_address")))
+        and len(mac_candidates) == 1
         and not any(gap["code"] in dhcp_blocking_gap_codes for gap in gaps)
         and not any(gap["severity"] == "conflict" for gap in gaps)
     )
@@ -529,6 +548,7 @@ def _expected_endpoint_facts(desired_endpoint: Any) -> dict[str, Any]:
         "name": _text(getattr(desired_endpoint, "name", None)),
         "endpoint_type": _text(getattr(desired_endpoint, "endpoint_type", None)),
         "ip_address": _text(getattr(desired_endpoint, "ip_address", None)),
+        "ip_policy": _text(getattr(desired_endpoint, "ip_policy", None)),
         "dns_name": _text(getattr(desired_endpoint, "dns_name", None)),
         "generate_dnsmasq": bool(getattr(desired_endpoint, "generate_dnsmasq", False)),
         "dnsmasq_record_type": _text(getattr(desired_endpoint, "dnsmasq_record_type", None)),
@@ -652,6 +672,109 @@ def _node_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[d
                 "actual": actual_hostname,
             }
         )
+    return gaps
+
+
+def _ip_policy_range_gaps(expected: dict[str, Any], classification: dict[str, Any]) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    ip_address_text = _text(expected.get("ip_address"))
+    ip_policy = _text(expected.get("ip_policy"))
+    matching_ranges = _list(classification.get("matching_ranges"))
+    invalid_ranges = _list(classification.get("invalid_ranges"))
+    overlapping_matching_ranges = _list(classification.get("overlapping_matching_ranges"))
+
+    if invalid_ranges:
+        gaps.append(
+            {
+                "code": "invalid_ip_policy_range",
+                "severity": "partial",
+                "invalid_ranges": invalid_ranges,
+            }
+        )
+
+    if ip_address_text and not classification.get("endpoint_ip_valid", False):
+        gaps.append(
+            {
+                "code": "invalid_ip_policy_range",
+                "severity": "partial",
+                "endpoint_ip": classification.get("endpoint_ip"),
+            }
+        )
+        return gaps
+
+    if not ip_address_text:
+        return gaps
+
+    if ip_policy in {"static", "dhcp_reserved"} and not matching_ranges:
+        gaps.append({"code": "missing_ip_policy_range", "severity": "partial"})
+        return gaps
+
+    if len(matching_ranges) > 1 or overlapping_matching_ranges:
+        gaps.append(
+            {
+                "code": "ambiguous_ip_policy_range",
+                "severity": "partial",
+                "matching_ranges": matching_ranges,
+                "overlapping_ranges": overlapping_matching_ranges,
+            }
+        )
+
+    matching_policies = {range_fact.get("range_policy") for range_fact in matching_ranges}
+    if ip_policy == "dhcp_reserved":
+        if "dhcp_dynamic_pool" in matching_policies:
+            gaps.append(
+                {
+                    "code": "dhcp_reserved_endpoint_in_dynamic_pool",
+                    "severity": "partial",
+                    "matching_ranges": [
+                        range_fact for range_fact in matching_ranges if range_fact.get("range_policy") == "dhcp_dynamic_pool"
+                    ],
+                }
+            )
+        if matching_policies and "dhcp_reservable_pool" not in matching_policies:
+            gaps.append(
+                {
+                    "code": "ip_policy_range_mismatch",
+                    "severity": "partial",
+                    "ip_policy": ip_policy,
+                    "matching_range_policies": sorted(_text(policy) for policy in matching_policies),
+                }
+            )
+    elif ip_policy == "static":
+        dhcp_pool_ranges = [
+            range_fact
+            for range_fact in matching_ranges
+            if range_fact.get("range_policy") in {"dhcp_reservable_pool", "dhcp_dynamic_pool"}
+        ]
+        if dhcp_pool_ranges:
+            gaps.append(
+                {
+                    "code": "static_endpoint_in_dhcp_pool",
+                    "severity": "partial",
+                    "matching_ranges": dhcp_pool_ranges,
+                }
+            )
+        if matching_policies and not matching_policies.intersection({"static_pool", "excluded"}):
+            gaps.append(
+                {
+                    "code": "ip_policy_range_mismatch",
+                    "severity": "partial",
+                    "ip_policy": ip_policy,
+                    "matching_range_policies": sorted(_text(policy) for policy in matching_policies),
+                }
+            )
+    elif ip_policy == "external" and matching_ranges:
+        gaps.append(
+            {
+                "code": "ip_policy_range_mismatch",
+                "severity": "partial",
+                "ip_policy": ip_policy,
+                "matching_ranges": matching_ranges,
+            }
+        )
+    elif not ip_policy:
+        gaps.append({"code": "missing_ip_policy_range", "severity": "partial"})
+
     return gaps
 
 
@@ -813,7 +936,11 @@ def _primary_mac_candidate_from_facts(actual: dict[str, Any]) -> dict[str, Any]:
 
 
 def _wants_dhcp_material(desired_endpoint: Any) -> bool:
-    return bool(getattr(desired_endpoint, "generate_dnsmasq", False)) and bool(_text(getattr(desired_endpoint, "ip_address", None)))
+    return (
+        _text(getattr(desired_endpoint, "ip_policy", None)) == "dhcp_reserved"
+        and bool(getattr(desired_endpoint, "generate_dnsmasq", False))
+        and bool(_text(getattr(desired_endpoint, "ip_address", None)))
+    )
 
 
 def _interfaces(actual_node: Any) -> list[Any]:

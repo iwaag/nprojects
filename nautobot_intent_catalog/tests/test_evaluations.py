@@ -42,6 +42,7 @@ def endpoint(**overrides):
         "name": "primary",
         "endpoint_type": "primary",
         "ip_address": "192.0.2.10/32",
+        "ip_policy": "dhcp_reserved",
         "dns_name": "edge-1.example.test",
         "generate_dnsmasq": True,
         "dnsmasq_record_type": "host_record",
@@ -514,6 +515,114 @@ class EndpointEvaluationTests(unittest.TestCase):
         self.assertEqual(payload.status, "satisfied")
         self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
         self.assertEqual(payload.observed_facts["interface_candidates"][0]["interface_name"], "primary_mac_address")
+
+    def test_dhcp_reserved_endpoint_in_reservable_pool_can_be_dhcp_ready(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        desired_range = ip_range(
+            name="reservable",
+            slug="reservable",
+            start_address="192.0.2.1",
+            end_address="192.0.2.200",
+            range_policy="dhcp_reservable_pool",
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            range_candidates=[desired_range],
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertEqual(payload.expected_facts["ip_policy"], "dhcp_reserved")
+        self.assertTrue(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertEqual(payload.observed_facts["matching_ip_policy_ranges"][0]["slug"], "reservable")
+
+    def test_dhcp_reserved_endpoint_in_dynamic_pool_is_partial_and_not_ready(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        desired_range = ip_range(
+            name="dynamic",
+            slug="dynamic",
+            start_address="192.0.2.1",
+            end_address="192.0.2.200",
+            range_policy="dhcp_dynamic_pool",
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            range_candidates=[desired_range],
+        )
+
+        self.assertEqual(payload.status, "partial")
+        self.assertFalse(payload.deterministic_summary["dhcp_reservation_ready"])
+        self.assertIn("dhcp_reserved_endpoint_in_dynamic_pool", payload.deterministic_summary["gap_codes"])
+
+    def test_static_endpoint_with_mac_is_not_dhcp_ready(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        desired_range = ip_range(
+            name="static",
+            slug="static",
+            start_address="192.0.2.1",
+            end_address="192.0.2.200",
+            range_policy="static_pool",
+        )
+
+        payload = evaluate_endpoint_intent(
+            endpoint(
+                desired_node=desired_node,
+                realized_ip_address=actual_ip(),
+                ip_policy="static",
+            ),
+            range_candidates=[desired_range],
+        )
+
+        self.assertEqual(payload.status, "satisfied")
+        self.assertFalse(payload.deterministic_summary["dhcp_reservation_ready"])
+
+    def test_missing_and_ambiguous_policy_ranges_are_reported(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        first = ip_range(
+            name="reservable",
+            slug="reservable",
+            start_address="192.0.2.1",
+            end_address="192.0.2.200",
+            range_policy="dhcp_reservable_pool",
+        )
+        second = ip_range(
+            name="static",
+            slug="static",
+            start_address="192.0.2.10",
+            end_address="192.0.2.20",
+            range_policy="static_pool",
+        )
+
+        missing = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            range_candidates=[],
+        )
+        ambiguous = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            range_candidates=[first, second],
+        )
+
+        self.assertIn("missing_ip_policy_range", missing.deterministic_summary["gap_codes"])
+        self.assertFalse(missing.deterministic_summary["dhcp_reservation_ready"])
+        self.assertIn("ambiguous_ip_policy_range", ambiguous.deterministic_summary["gap_codes"])
+        self.assertFalse(ambiguous.deterministic_summary["dhcp_reservation_ready"])
+
+    def test_invalid_policy_range_is_reported_without_crashing(self) -> None:
+        desired_node = node(realized_device=actual_node(interfaces=[interface()]))
+        invalid_range = ip_range(start_address="not-an-ip")
+
+        payload = evaluate_endpoint_intent(
+            endpoint(desired_node=desired_node, realized_ip_address=actual_ip()),
+            range_candidates=[invalid_range],
+        )
+
+        self.assertEqual(payload.status, "partial")
+        self.assertIn("invalid_ip_policy_range", payload.deterministic_summary["gap_codes"])
+        self.assertEqual(
+            payload.observed_facts["ip_policy_range_classification"]["invalid_ranges"][0]["errors"],
+            ["invalid_start_address"],
+        )
 
 
 class ServiceEvaluationTests(unittest.TestCase):
