@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 try:
+    from django.core.exceptions import ValidationError
     from django.db import models
     from django.urls import reverse
     from nautobot.apps.models import PrimaryModel
@@ -204,21 +205,26 @@ else:
 
 
     class DesiredNode(PrimaryModel):
-        """Desired compute or network node managed as intent."""
+        """Desired node intent that may be realized by one or more actual object types."""
 
         NODE_TYPE_DEVICE = "device"
         NODE_TYPE_VIRTUAL_MACHINE = "virtual_machine"
         NODE_TYPE_CONTAINER = "container"
         NODE_TYPE_SERVICE_HOST = "service_host"
-        NODE_TYPE_NETWORK = "network"
-        NODE_TYPE_OTHER = "other"
         NODE_TYPE_CHOICES = (
             (NODE_TYPE_DEVICE, "Device"),
             (NODE_TYPE_VIRTUAL_MACHINE, "Virtual machine"),
             (NODE_TYPE_CONTAINER, "Container"),
             (NODE_TYPE_SERVICE_HOST, "Service host"),
-            (NODE_TYPE_NETWORK, "Network"),
-            (NODE_TYPE_OTHER, "Other"),
+        )
+
+        ACTUAL_TYPE_DEVICE = "device"
+        ACTUAL_TYPE_VIRTUAL_MACHINE = "virtual_machine"
+        ACTUAL_TYPE_CONTAINER = "container"
+        ACTUAL_TYPE_CHOICES = (
+            (ACTUAL_TYPE_DEVICE, "Device"),
+            (ACTUAL_TYPE_VIRTUAL_MACHINE, "Virtual machine"),
+            (ACTUAL_TYPE_CONTAINER, "Container"),
         )
 
         LIFECYCLE_PLANNED = "planned"
@@ -248,6 +254,14 @@ else:
         )
         role = models.CharField(max_length=255, blank=True, null=True)
         description = models.TextField(blank=True, null=True)
+        accepted_actual_types = models.JSONField(
+            default=list,
+            blank=True,
+            help_text=(
+                "Nautobot object types that may realize this desired node. "
+                "Allowed values are device, virtual_machine, and container."
+            ),
+        )
         expected_spec = models.JSONField(default=dict, blank=True)
         intent_source = models.ForeignKey(
             IntentSource,
@@ -282,6 +296,35 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:desirednode", args=[self.pk])
+
+        def clean(self):
+            """Validate desired node intent fields."""
+
+            super().clean()
+            accepted_actual_types = self.accepted_actual_types
+            if accepted_actual_types is None:
+                accepted_actual_types = []
+                self.accepted_actual_types = accepted_actual_types
+
+            if not isinstance(accepted_actual_types, list):
+                raise ValidationError(
+                    {"accepted_actual_types": "Accepted actual types must be a list."}
+                )
+
+            allowed_actual_types = {value for value, _label in self.ACTUAL_TYPE_CHOICES}
+            invalid_actual_types = [
+                value
+                for value in accepted_actual_types
+                if not isinstance(value, str) or value not in allowed_actual_types
+            ]
+            if invalid_actual_types:
+                raise ValidationError(
+                    {
+                        "accepted_actual_types": (
+                            "Accepted actual types must only contain device, virtual_machine, or container."
+                        )
+                    }
+                )
 
 
     class DesiredEndpoint(PrimaryModel):

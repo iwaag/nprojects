@@ -135,6 +135,7 @@ def desired_node_defaults(node: DesiredNodeEntry, intent_source_id: Any | None =
     defaults = {
         "name": node.name,
         "node_type": node.node_type,
+        "accepted_actual_types": node.accepted_actual_types,
         "lifecycle": node.lifecycle,
         "role": node.role,
         "description": node.description,

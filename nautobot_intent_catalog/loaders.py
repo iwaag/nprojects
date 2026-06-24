@@ -45,6 +45,7 @@ class DesiredNodeEntry:
     name: str
     slug: str
     node_type: str = "device"
+    accepted_actual_types: list[str] = field(default_factory=list)
     lifecycle: str = "planned"
     role: str | None = None
     description: str | None = None
@@ -270,11 +271,31 @@ def _normalize_desired_node_entry(item: Any, index: int) -> tuple[DesiredNodeEnt
     if not isinstance(expected_spec, dict):
         return None, [f"desired_nodes entry {index} expected_spec must be a mapping."]
 
+    node_type, node_type_error = _choice_with_default_or_error(
+        item.get("node_type"),
+        _NODE_TYPES,
+        f"desired_nodes entry {index} node_type",
+        "device",
+    )
+    accepted_actual_types, accepted_actual_types_error = _actual_types_or_error(
+        item.get("accepted_actual_types"),
+        node_type or "device",
+        f"desired_nodes entry {index} accepted_actual_types",
+    )
+    errors = []
+    if node_type_error:
+        errors.append(node_type_error)
+    if accepted_actual_types_error:
+        errors.append(accepted_actual_types_error)
+    if errors:
+        return None, errors
+
     return (
         DesiredNodeEntry(
             name=name,
             slug=slug,
-            node_type=_choice(item.get("node_type"), _NODE_TYPES, "device"),
+            node_type=node_type or "device",
+            accepted_actual_types=accepted_actual_types,
             lifecycle=_choice(item.get("lifecycle"), _LIFECYCLES, "planned"),
             role=_optional_str(item.get("role")),
             description=_optional_str(item.get("description")),
@@ -459,6 +480,35 @@ def _choice_or_error(value: Any, allowed: set[str], field_name: str) -> tuple[st
     return None, f"{field_name} must be one of: {', '.join(sorted(allowed))}."
 
 
+def _choice_with_default_or_error(
+    value: Any,
+    allowed: set[str],
+    field_name: str,
+    default: str,
+) -> tuple[str | None, str | None]:
+    if value is None or value == "":
+        return default, None
+    return _choice_or_error(value, allowed, field_name)
+
+
+def _actual_types_or_error(value: Any, node_type: str, field_name: str) -> tuple[list[str], str | None]:
+    if value is None:
+        return list(_ACTUAL_TYPE_DEFAULTS[node_type]), None
+    if not isinstance(value, list):
+        return [], f"{field_name} must be a list."
+
+    actual_types = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            return [], f"{field_name} must contain non-empty strings."
+        normalized = item.strip().lower().replace("-", "_")
+        if normalized not in _ACTUAL_TYPES:
+            return [], f"{field_name} must be one of: {', '.join(sorted(_ACTUAL_TYPES))}."
+        if normalized not in actual_types:
+            actual_types.append(normalized)
+    return actual_types, None
+
+
 def _address_errors(value: str, field_name: str) -> list[str]:
     try:
         ipaddress.ip_address(value)
@@ -497,7 +547,14 @@ def _resolve_configured_path(value: str | Path) -> Path:
     return Path.cwd() / path
 
 
-_NODE_TYPES = {"device", "virtual_machine", "container", "service_host", "network", "other"}
+_NODE_TYPES = {"device", "virtual_machine", "container", "service_host"}
+_ACTUAL_TYPES = {"device", "virtual_machine", "container"}
+_ACTUAL_TYPE_DEFAULTS = {
+    "device": ("device",),
+    "virtual_machine": ("virtual_machine",),
+    "container": ("container",),
+    "service_host": ("device", "virtual_machine", "container"),
+}
 _LIFECYCLES = {"planned", "approved", "active", "deprecated", "retired"}
 _ENDPOINT_TYPES = {"primary", "management", "service", "vpn", "mdns", "other"}
 _DNSMASQ_RECORD_TYPES = {"host_record", "address", "cname"}

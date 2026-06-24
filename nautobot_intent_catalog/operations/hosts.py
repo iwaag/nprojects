@@ -32,7 +32,8 @@ def create_desired_node_with_primary_endpoint(
     *,
     name: str,
     slug: str,
-    node_type: str = "device",
+    node_type: str = "virtual_machine",
+    accepted_actual_types: list[str] | None = None,
     lifecycle: str = "planned",
     role: str | None = None,
     description: str | None = None,
@@ -65,6 +66,7 @@ def create_desired_node_with_primary_endpoint(
         "name": _required_str(name, "name"),
         "slug": _required_str(slug, "slug"),
         "node_type": _required_str(node_type, "node_type"),
+        "accepted_actual_types": _accepted_actual_types(accepted_actual_types, node_type),
         "lifecycle": _required_str(lifecycle, "lifecycle"),
         "role": _optional_str(role),
         "description": _optional_str(description),
@@ -91,6 +93,7 @@ def create_desired_node_with_primary_endpoint(
         "name": cleaned["name"],
         "slug": cleaned["slug"],
         "node_type": cleaned["node_type"],
+        "accepted_actual_types": cleaned["accepted_actual_types"],
         "lifecycle": cleaned["lifecycle"],
         "role": cleaned["role"],
         "description": cleaned["description"],
@@ -169,6 +172,40 @@ def _optional_str(value: Any) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _accepted_actual_types(value: list[str] | None, node_type: str) -> list[str]:
+    if value is None:
+        defaults = {
+            "device": ["device"],
+            "virtual_machine": ["virtual_machine"],
+            "container": ["container"],
+            "service_host": ["device", "virtual_machine", "container"],
+        }
+        return list(defaults.get(_required_str(node_type, "node_type"), ["device"]))
+
+    if not isinstance(value, list):
+        _raise_validation_error({"accepted_actual_types": ["Accepted actual types must be a list."]})
+
+    allowed = {"device", "virtual_machine", "container"}
+    actual_types = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            _raise_validation_error(
+                {"accepted_actual_types": ["Accepted actual types must contain non-empty strings."]}
+            )
+        normalized = item.strip().lower().replace("-", "_")
+        if normalized not in allowed:
+            _raise_validation_error(
+                {
+                    "accepted_actual_types": [
+                        "Accepted actual types must only contain device, virtual_machine, or container."
+                    ]
+                }
+            )
+        if normalized not in actual_types:
+            actual_types.append(normalized)
+    return actual_types
 
 
 def _require_django() -> None:

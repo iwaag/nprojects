@@ -187,6 +187,7 @@ else:
                 "lifecycle",
                 "role",
                 "description",
+                "accepted_actual_types",
                 "expected_spec",
                 "intent_source",
                 "realized_device",

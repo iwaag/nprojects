@@ -97,6 +97,8 @@ desired_nodes:
   - name: Edge Router 1
     slug: edge-router-1
     node_type: virtual_machine
+    accepted_actual_types:
+      - virtual_machine
     lifecycle: approved
     role: edge
     intent_source: service
@@ -126,6 +128,8 @@ desired_nodes:
   - name: pcmain
     slug: pcmain
     node_type: device
+    accepted_actual_types:
+      - device
     lifecycle: active
 
 desired_endpoints:
@@ -151,6 +155,25 @@ in the same YAML input. Missing node references are reported as deterministic
 validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
 intent can be captured before a Nautobot `IPAddress` exists; actual state is
 linked separately through `realized_ip_address`.
+
+Raw YAML desired node input separates the desired node classification from the
+acceptable Nautobot object types that may realize it. Use `node_type` for the
+intent catalog classification and `accepted_actual_types` for candidate matching
+and explicit realized-object validation. For example, a service host that may
+run on a physical device, VM, or container can use:
+
+```yaml
+desired_nodes:
+  - name: dnsmasq-main
+    slug: dnsmasq-main
+    node_type: service_host
+    accepted_actual_types:
+      - device
+      - virtual_machine
+      - container
+    lifecycle: active
+    role: dnsmasq
+```
 
 ## Quick Host Add
 
@@ -361,6 +384,13 @@ python3 -m unittest discover -s nautobot_intent_catalog/tests
 This App is intentionally moving without backward compatibility artifacts. It
 does not provide old plugin names, old URL aliases, old settings fallbacks, or
 automatic cleanup migrations.
+
+`DesiredNode.node_type` no longer accepts the ambiguous `network` or `other`
+values. Before applying the schema change in an existing Nautobot database,
+manually update affected rows to `device`, `virtual_machine`, `container`, or
+`service_host`, and set `accepted_actual_types` to the Nautobot object types
+that may realize each desired node. The App does not provide an automatic
+compatibility migration for those old values.
 
 When replacing an older installation, review your Nautobot environment and
 manually remove obsolete data only after exporting anything you need to keep.

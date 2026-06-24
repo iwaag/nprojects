@@ -97,12 +97,82 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(len(result.desired_nodes), 1)
         self.assertEqual(result.desired_nodes[0].slug, "edge-router-1")
         self.assertEqual(result.desired_nodes[0].node_type, "virtual_machine")
+        self.assertEqual(result.desired_nodes[0].accepted_actual_types, ["virtual_machine"])
         self.assertEqual(result.desired_nodes[0].expected_spec, {"cpu": 2})
         self.assertEqual(len(result.desired_endpoints), 1)
         self.assertEqual(result.desired_endpoints[0].desired_node, "edge-router-1")
         self.assertEqual(result.desired_endpoints[0].port, 443)
         self.assertTrue(result.desired_endpoints[0].generate_dnsmasq)
         self.assertEqual(result.desired_endpoints[0].ip_policy, "dhcp_reserved")
+
+    def test_loader_reads_desired_node_accepted_actual_types(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_nodes:\n"
+                "  - name: dnsmasq-main\n"
+                "    node_type: service_host\n"
+                "    accepted_actual_types:\n"
+                "      - device\n"
+                "      - virtual-machine\n"
+                "      - device\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.desired_nodes[0].accepted_actual_types, ["device", "virtual_machine"])
+
+    def test_loader_defaults_service_host_accepted_actual_types(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_nodes:\n"
+                "  - name: dnsmasq-main\n"
+                "    node_type: service_host\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.desired_nodes[0].accepted_actual_types, ["device", "virtual_machine", "container"])
+
+    def test_loader_reports_invalid_desired_node_actual_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_nodes:\n"
+                "  - name: dnsmasq-main\n"
+                "    accepted_actual_types:\n"
+                "      - appliance\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(
+            result.errors,
+            ["desired_nodes entry 1 accepted_actual_types must be one of: container, device, virtual_machine."],
+        )
+
+    def test_loader_reports_invalid_desired_node_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_nodes:\n"
+                "  - name: dnsmasq-main\n"
+                "    node_type: network\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(
+            result.errors,
+            ["desired_nodes entry 1 node_type must be one of: container, device, service_host, virtual_machine."],
+        )
 
     def test_loader_normalizes_desired_ip_ranges(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

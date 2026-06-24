@@ -119,6 +119,7 @@ class ImporterTests(unittest.TestCase):
             name="Edge Router 1",
             slug="edge-router-1",
             node_type="virtual_machine",
+            accepted_actual_types=["virtual_machine"],
             lifecycle="approved",
             role="edge",
             expected_spec={"cpu": 2},
@@ -131,6 +132,7 @@ class ImporterTests(unittest.TestCase):
             {
                 "name": "Edge Router 1",
                 "node_type": "virtual_machine",
+                "accepted_actual_types": ["virtual_machine"],
                 "lifecycle": "approved",
                 "role": "edge",
                 "description": None,

@@ -129,6 +129,8 @@ class HostOperationTests(unittest.TestCase):
         self.assertIs(result.desired_endpoint, FakeDesiredEndpoint.objects.rows[0])
         self.assertEqual(result.desired_node.name, "App VM 1")
         self.assertEqual(result.desired_node.slug, "app-vm-1")
+        self.assertEqual(result.desired_node.node_type, "virtual_machine")
+        self.assertEqual(result.desired_node.accepted_actual_types, ["virtual_machine"])
         self.assertEqual(result.desired_endpoint.desired_node, result.desired_node)
         self.assertEqual(result.desired_endpoint.name, "primary")
         self.assertEqual(result.desired_endpoint.endpoint_type, "primary")
@@ -138,6 +140,25 @@ class HostOperationTests(unittest.TestCase):
         self.assertTrue(result.desired_endpoint.generate_dnsmasq)
         self.assertEqual(result.desired_endpoint.ip_policy, "dhcp_reserved")
         self.assertEqual(result.desired_endpoint.dnsmasq_record_type, "host_record")
+
+    def test_create_desired_node_with_primary_endpoint_derives_vm_actual_types(self) -> None:
+        result = hosts.create_desired_node_with_primary_endpoint(
+            name="App VM 1",
+            slug="app-vm-1",
+            node_type="virtual_machine",
+        )
+
+        self.assertEqual(result.desired_node.accepted_actual_types, ["virtual_machine"])
+
+    def test_create_desired_node_with_primary_endpoint_accepts_explicit_actual_types(self) -> None:
+        result = hosts.create_desired_node_with_primary_endpoint(
+            name="DNS Host",
+            slug="dns-host",
+            node_type="service_host",
+            accepted_actual_types=["device", "virtual-machine", "device"],
+        )
+
+        self.assertEqual(result.desired_node.accepted_actual_types, ["device", "virtual_machine"])
 
     def test_blank_primary_endpoint_dns_and_mdns_names_are_defaulted(self) -> None:
         result = hosts.create_desired_node_with_primary_endpoint(
