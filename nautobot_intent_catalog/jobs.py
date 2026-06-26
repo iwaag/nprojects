@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .analysis import analyze_intent_sources
+from .ansible_inventory import export_hosts_intent, render_hosts_intent_json, render_hosts_intent_yml
 from .dnsmasq import export_dnsmasq_records, render_dnsmasq_export_json, render_dnsmasq_records_conf
 from .evaluations import (
     ENDPOINT_TARGET_TYPE,
@@ -518,6 +519,49 @@ else:
                 self.logger.info("dnsmasq export skipped endpoints: %s", _json(export.skipped))
 
 
+    class ExportAnsibleHostsIntent(Job):
+        """Export minimal Ansible bootstrap inventory from desired nodes."""
+
+        include_skipped = BooleanVar(
+            default=True,
+            description="Include skipped node and group details in the Job log.",
+        )
+
+        class Meta:
+            name = "Export Ansible Hosts Intent"
+            description = "Export a deterministic mDNS bootstrap inventory from DesiredNode rows."
+            has_sensitive_variables = False
+
+        def run(self, include_skipped: bool) -> None:
+            nodes = DesiredNode.objects.prefetch_related("desired_endpoints").order_by("slug")
+            node_list = list(nodes)
+            export = export_hosts_intent(node_list, include_skipped=include_skipped)
+            generated_at = timezone.now().isoformat()
+            job_result_id = str(getattr(self.job_result, "id", "")) or None
+            self.create_file(
+                "hosts_intent.yml",
+                render_hosts_intent_yml(export, generated_at=generated_at, job_result_id=job_result_id),
+            )
+            self.create_file(
+                "hosts-intent-export.json",
+                render_hosts_intent_json(export, generated_at=generated_at, job_result_id=job_result_id),
+            )
+            self.logger.info("Ansible hosts intent export summary: %s", _json(export.summary))
+            self.logger.info(
+                "Ansible hosts intent export counts: %s",
+                _json(
+                    {
+                        "desired_nodes": len(node_list),
+                        "exported_hosts": len(export.hosts),
+                        "skipped_details": len(export.skipped),
+                    }
+                ),
+            )
+            self.logger.info("Ansible hosts intent export files: hosts_intent.yml, hosts-intent-export.json")
+            if include_skipped:
+                self.logger.info("Ansible hosts intent export skipped details: %s", _json(export.skipped))
+
+
     class ReconcileDesiredIPAMIntent(Job):
         """Optionally create or link Nautobot IPAddress rows from explicit endpoint IP intent."""
 
@@ -614,6 +658,7 @@ else:
         EvaluateEndpointIntent,
         EvaluateServiceIntent,
         ExportDnsmasqRecords,
+        ExportAnsibleHostsIntent,
         ReconcileDesiredIPAMIntent,
     )
     register_jobs(*jobs)
