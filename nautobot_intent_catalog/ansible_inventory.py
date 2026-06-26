@@ -12,7 +12,9 @@ import yaml
 
 ANSIBLE_HOSTS_INTENT_SCHEMA_VERSION = "1.0"
 ELIGIBLE_NODE_LIFECYCLES = frozenset({"planned", "approved", "active"})
-ELIGIBLE_NODE_TYPES = frozenset({"device", "virtual_machine"})
+# service_host represents a host whose eventual Nautobot object may be either a
+# device or a virtual machine, so it is eligible for bootstrap discovery too.
+ELIGIBLE_NODE_TYPES = frozenset({"device", "virtual_machine", "service_host"})
 
 
 @dataclass(frozen=True)

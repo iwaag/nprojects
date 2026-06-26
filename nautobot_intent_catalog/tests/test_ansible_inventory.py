@@ -92,6 +92,25 @@ class HostsIntentExportTests(unittest.TestCase):
         self.assertEqual(export.hosts[0]["desired_endpoint"], "primary")
         self.assertEqual(export.hosts[0]["mdns_hostname"], "aggrafana.local")
 
+    def test_service_host_exports_for_bootstrap_discovery(self) -> None:
+        desired = node(
+            "DNS service host",
+            "agdns",
+            node_type="service_host",
+            expected_spec={"host_os": "linux", "ansible_groups": ["dnsmasq_server"]},
+            endpoints=[endpoint("primary", mdns_name="agdns.local")],
+        )
+
+        export = export_hosts_intent([desired])
+
+        self.assertEqual(export.summary["exported_hosts"], 1)
+        self.assertEqual(export.skipped, [])
+        self.assertIn("agdns", export.inventory["all"]["children"]["ssh_hosts"]["hosts"])
+        self.assertEqual(
+            export.inventory["all"]["children"]["dnsmasq_server"]["hosts"],
+            {"agdns": {}},
+        )
+
     def test_explicit_mdns_endpoint_selection_wins_over_primary(self) -> None:
         desired = node(
             "ag Node",
