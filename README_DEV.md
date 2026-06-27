@@ -38,6 +38,11 @@ loader, importer, and analysis code that can run without Nautobot:
 python3 -m unittest discover -s nautobot_intent_catalog/tests
 ```
 
+Production inventory schema 1.0 and deployment-profile Job inputs are validated
+by the Django-free `production_inventory_contract.py` module. Its scenario
+fixtures cover supported platforms, actual-data freshness, reference failures,
+profile validation, drift, power policy, and placement-variable conflicts.
+
 ## Nautobot Verification
 
 After installing into a real Nautobot environment, verify migrations there:
