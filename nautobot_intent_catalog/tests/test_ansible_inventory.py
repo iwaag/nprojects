@@ -19,7 +19,6 @@ def node(
     *,
     lifecycle: str = "planned",
     node_type: str = "device",
-    expected_spec=None,
     endpoints=None,
 ):
     return SimpleNamespace(
@@ -28,7 +27,6 @@ def node(
         slug=slug,
         lifecycle=lifecycle,
         node_type=node_type,
-        expected_spec=expected_spec or {},
         desired_endpoints=endpoints or [],
     )
 
@@ -60,24 +58,31 @@ class HostsIntentExportTests(unittest.TestCase):
         desired = node(
             "ag Nomad",
             "agnomad",
-            expected_spec={"host_os": "linux", "ansible_groups": ["nomad_server"]},
             endpoints=[endpoint("primary", mdns_name="agnomad.local")],
         )
 
         export = export_hosts_intent([desired])
 
         self.assertEqual(export.summary["exported_hosts"], 1)
-        self.assertEqual(export.summary["groups"], ["nomad_server", "ssh_hosts"])
+        self.assertEqual(export.summary["groups"], ["ssh_hosts"])
         self.assertEqual(export.skipped, [])
         ssh_hosts = export.inventory["all"]["children"]["ssh_hosts"]["hosts"]
         self.assertEqual(ssh_hosts["agnomad"]["mdns_hostname"], "agnomad.local")
-        self.assertEqual(ssh_hosts["agnomad"]["host_os"], "linux")
         self.assertEqual(ssh_hosts["agnomad"]["nintent_inventory_stage"], "reserved_name")
         self.assertTrue(ssh_hosts["agnomad"]["name_reserved_only"])
-        self.assertEqual(
-            export.inventory["all"]["children"]["nomad_server"]["hosts"],
-            {"agnomad": {}},
+        self.assertNotIn("host_os", ssh_hosts["agnomad"])
+
+    def test_bootstrap_export_contains_no_service_groups(self) -> None:
+        desired = node(
+            "ag Nomad",
+            "agnomad",
+            endpoints=[endpoint("primary", mdns_name="agnomad.local")],
         )
+
+        export = export_hosts_intent([desired])
+
+        groups = list(export.inventory["all"]["children"].keys())
+        self.assertEqual(groups, ["ssh_hosts"])
 
     def test_export_does_not_require_mdns_endpoint_type(self) -> None:
         desired = node(
@@ -97,7 +102,6 @@ class HostsIntentExportTests(unittest.TestCase):
             "DNS service host",
             "agdns",
             node_type="service_host",
-            expected_spec={"host_os": "linux", "ansible_groups": ["dnsmasq_server"]},
             endpoints=[endpoint("primary", mdns_name="agdns.local")],
         )
 
@@ -106,29 +110,6 @@ class HostsIntentExportTests(unittest.TestCase):
         self.assertEqual(export.summary["exported_hosts"], 1)
         self.assertEqual(export.skipped, [])
         self.assertIn("agdns", export.inventory["all"]["children"]["ssh_hosts"]["hosts"])
-        self.assertEqual(
-            export.inventory["all"]["children"]["dnsmasq_server"]["hosts"],
-            {"agdns": {}},
-        )
-
-    def test_explicit_mdns_endpoint_selection_wins_over_primary(self) -> None:
-        desired = node(
-            "ag Node",
-            "agnode",
-            expected_spec={"ansible_mdns_endpoint": "bootstrap"},
-            endpoints=[
-                endpoint("primary", endpoint_type="primary", mdns_name="primary.local"),
-                endpoint("bootstrap", endpoint_type="service", mdns_name="bootstrap.local"),
-            ],
-        )
-
-        export = export_hosts_intent([desired])
-
-        self.assertEqual(export.hosts[0]["desired_endpoint"], "bootstrap")
-        self.assertEqual(
-            export.inventory["all"]["children"]["ssh_hosts"]["hosts"]["agnode"]["mdns_hostname"],
-            "bootstrap.local",
-        )
 
     def test_endpoint_selection_prefers_primary_then_management_then_fallback(self) -> None:
         management_only = node(
@@ -161,30 +142,6 @@ class HostsIntentExportTests(unittest.TestCase):
         export = export_hosts_intent([desired])
 
         self.assertEqual(export.summary["exported_hosts"], 1)
-
-    def test_absent_host_os_is_omitted(self) -> None:
-        desired = node("No OS", "no-os", endpoints=[endpoint("primary", mdns_name="no-os.local")])
-
-        export = export_hosts_intent([desired])
-        host_vars = export.inventory["all"]["children"]["ssh_hosts"]["hosts"]["no-os"]
-
-        self.assertNotIn("host_os", host_vars)
-
-    def test_malformed_ansible_groups_do_not_crash_export(self) -> None:
-        desired = node(
-            "Bad Groups",
-            "bad-groups",
-            expected_spec={"ansible_groups": ["nomad-server", "123", "", None]},
-            endpoints=[endpoint("primary", mdns_name="bad-groups.local")],
-        )
-
-        export = export_hosts_intent([desired])
-
-        self.assertEqual(export.summary["exported_hosts"], 1)
-        self.assertIn("nomad_server", export.inventory["all"]["children"])
-        self.assertEqual(export.summary["skipped_groups"], 3)
-        skipped_groups = [entry for entry in export.skipped if entry["item_type"] == "ansible_group"]
-        self.assertEqual(len(skipped_groups), 3)
 
     def test_node_without_mdns_endpoint_is_skipped(self) -> None:
         desired = node("No mDNS", "no-mdns", endpoints=[endpoint("primary")])
@@ -219,7 +176,6 @@ class HostsIntentExportTests(unittest.TestCase):
         desired = node(
             "ag Nomad",
             "agnomad",
-            expected_spec={"host_os": "linux", "ansible_groups": ["nomad_server"]},
             endpoints=[endpoint("primary", mdns_name="agnomad.local")],
         )
         export = export_hosts_intent([desired])
@@ -231,8 +187,23 @@ class HostsIntentExportTests(unittest.TestCase):
         )
         loaded = yaml.safe_load(rendered)
 
-        self.assertIn("# schema_version: 1.0\n", rendered)
+        self.assertIn("# schema_version: 2.0\n", rendered)
         self.assertEqual(loaded["all"]["children"]["ssh_hosts"]["hosts"]["agnomad"]["mdns_hostname"], "agnomad.local")
+
+    def test_rendered_yaml_contains_no_host_os(self) -> None:
+        desired = node(
+            "ag Nomad",
+            "agnomad",
+            endpoints=[endpoint("primary", mdns_name="agnomad.local")],
+        )
+        export = export_hosts_intent([desired])
+
+        rendered = render_hosts_intent_yml(
+            export,
+            generated_at="2026-06-26T00:00:00+00:00",
+        )
+
+        self.assertNotIn("host_os", rendered)
 
     def test_json_payload_contains_inventory_hosts_and_skipped(self) -> None:
         desired = node("ag Node", "agnode", endpoints=[endpoint("primary", mdns_name="agnode.local")])
@@ -244,11 +215,17 @@ class HostsIntentExportTests(unittest.TestCase):
             job_result_id="job-123",
         )
 
-        self.assertEqual(payload["schema_version"], "1.0")
+        self.assertEqual(payload["schema_version"], "2.0")
         self.assertEqual(payload["job_result_id"], "job-123")
         self.assertEqual(payload["hosts"][0]["inventory_hostname"], "agnode")
         self.assertIn("ssh_hosts", payload["inventory"]["all"]["children"])
         self.assertTrue(render_hosts_intent_json(export, generated_at="2026-06-26T00:00:00+00:00").endswith("\n"))
+
+    def test_summary_has_no_skipped_groups_field(self) -> None:
+        desired = node("ag Node", "agnode", endpoints=[endpoint("primary", mdns_name="agnode.local")])
+        export = export_hosts_intent([desired])
+
+        self.assertNotIn("skipped_groups", export.summary)
 
 
 if __name__ == "__main__":

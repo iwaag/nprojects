@@ -10,7 +10,7 @@ from typing import Any, Iterable
 import yaml
 
 
-ANSIBLE_HOSTS_INTENT_SCHEMA_VERSION = "1.0"
+ANSIBLE_HOSTS_INTENT_SCHEMA_VERSION = "2.0"
 ELIGIBLE_NODE_LIFECYCLES = frozenset({"planned", "approved", "active"})
 # service_host represents a host whose eventual Nautobot object may be either a
 # device or a virtual machine, so it is eligible for bootstrap discovery too.
@@ -44,17 +44,15 @@ def export_hosts_intent(nodes: Iterable[Any], *, include_skipped: bool = True) -
     total_nodes = 0
     exported_nodes = 0
     skipped_nodes = 0
-    skipped_group_count = 0
 
     for node in sorted(list(nodes), key=_node_sort_key):
         total_nodes += 1
-        expected_spec = _mapping(getattr(node, "expected_spec", None))
         node_skip_reasons = _node_skip_reasons(node)
-        endpoint = _select_mdns_endpoint(node, expected_spec)
+        endpoint = _select_mdns_endpoint(node)
         if endpoint is None:
             node_skip_reasons.append("missing_mdns_name")
 
-        inventory_hostname = _inventory_hostname(node, expected_spec)
+        inventory_hostname = _inventory_hostname(node)
         if not _valid_inventory_hostname(inventory_hostname):
             node_skip_reasons.append("invalid_inventory_hostname")
 
@@ -65,7 +63,7 @@ def export_hosts_intent(nodes: Iterable[Any], *, include_skipped: bool = True) -
             continue
 
         exported_nodes += 1
-        host_vars = _host_vars(node, endpoint, expected_spec)
+        host_vars = _host_vars(node, endpoint)
         hosts.append(
             {
                 "inventory_hostname": inventory_hostname,
@@ -80,16 +78,6 @@ def export_hosts_intent(nodes: Iterable[Any], *, include_skipped: bool = True) -
         )
         group_members["ssh_hosts"].add(inventory_hostname)
 
-        for group in _list(expected_spec.get("ansible_groups")):
-            raw_group = _text(group)
-            normalized_group = _normalize_group_name(raw_group)
-            if not normalized_group:
-                skipped_group_count += 1
-                if include_skipped:
-                    skipped.append(_group_skip_entry(node, raw_group, "invalid_ansible_group"))
-                continue
-            group_members.setdefault(normalized_group, set()).add(inventory_hostname)
-
     hosts.sort(key=lambda item: item["inventory_hostname"])
     skipped.sort(key=_skip_sort_key)
     inventory = _inventory(hosts, group_members)
@@ -99,7 +87,6 @@ def export_hosts_intent(nodes: Iterable[Any], *, include_skipped: bool = True) -
         "exported_hosts": len(hosts),
         "exported_nodes": exported_nodes,
         "skipped_nodes": skipped_nodes,
-        "skipped_groups": skipped_group_count,
         "skipped_details": len(skipped),
         "groups": sorted(group for group, members in group_members.items() if members),
     }
@@ -171,16 +158,10 @@ def _node_skip_reasons(node: Any) -> list[str]:
     return reasons
 
 
-def _select_mdns_endpoint(node: Any, expected_spec: dict[str, Any]) -> Any | None:
+def _select_mdns_endpoint(node: Any) -> Any | None:
     endpoints = [endpoint for endpoint in _endpoints(node) if _text(getattr(endpoint, "mdns_name", None))]
     if not endpoints:
         return None
-
-    preferred_name = _text(expected_spec.get("ansible_mdns_endpoint"))
-    if preferred_name:
-        for endpoint in sorted(endpoints, key=_endpoint_sort_key):
-            if _text(getattr(endpoint, "name", None)) == preferred_name:
-                return endpoint
 
     for endpoint_type in ("primary", "management"):
         matching = [
@@ -194,12 +175,12 @@ def _select_mdns_endpoint(node: Any, expected_spec: dict[str, Any]) -> Any | Non
     return sorted(endpoints, key=_endpoint_sort_key)[0]
 
 
-def _inventory_hostname(node: Any, expected_spec: dict[str, Any]) -> str:
-    return _text(expected_spec.get("ansible_host_name")) or _text(getattr(node, "slug", None))
+def _inventory_hostname(node: Any) -> str:
+    return _text(getattr(node, "slug", None))
 
 
-def _host_vars(node: Any, endpoint: Any, expected_spec: dict[str, Any]) -> dict[str, Any]:
-    host_vars = {
+def _host_vars(node: Any, endpoint: Any) -> dict[str, Any]:
+    return {
         "mdns_hostname": _text(getattr(endpoint, "mdns_name", None)),
         "nintent_inventory_stage": "reserved_name",
         "nintent_desired_node": _text(getattr(node, "name", None)),
@@ -209,10 +190,6 @@ def _host_vars(node: Any, endpoint: Any, expected_spec: dict[str, Any]) -> dict[
         "nintent_desired_endpoint_id": _pk(endpoint),
         "name_reserved_only": True,
     }
-    host_os = _text(expected_spec.get("host_os")) or _text(expected_spec.get("os"))
-    if host_os:
-        host_vars["host_os"] = host_os
-    return host_vars
 
 
 def _inventory(hosts: list[dict[str, Any]], group_members: dict[str, set[str]]) -> dict[str, Any]:
@@ -253,26 +230,6 @@ def _node_skip_entry(node: Any, endpoint: Any | None, reasons: list[str]) -> dic
     }
 
 
-def _group_skip_entry(node: Any, group: str, reason: str) -> dict[str, Any]:
-    return {
-        "item_type": "ansible_group",
-        "desired_node": _text(getattr(node, "name", None)),
-        "desired_node_id": _pk(node),
-        "desired_node_slug": _text(getattr(node, "slug", None)),
-        "group": group,
-        "reasons": [reason],
-    }
-
-
-def _normalize_group_name(value: str) -> str:
-    if not value:
-        return ""
-    normalized = re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_")
-    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", normalized):
-        return ""
-    return normalized
-
-
 def _valid_inventory_hostname(value: str) -> bool:
     return bool(value) and not bool(re.search(r"[\s:]", value))
 
@@ -291,10 +248,6 @@ def _skip_sort_key(entry: dict[str, Any]) -> tuple[str, str, str]:
         _text(entry.get("desired_node_slug")),
         _text(entry.get("group") or entry.get("desired_endpoint")),
     )
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def _list(value: Any) -> list[Any]:
