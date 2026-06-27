@@ -17,9 +17,13 @@ from .evaluations import (
     evaluate_service_intent,
 )
 from .importers import (
+    desired_node_operational_config_defaults,
+    desired_node_operational_config_identity,
     desired_service_defaults,
     desired_service_dependencies,
     desired_service_identity,
+    desired_service_placement_defaults,
+    desired_service_placement_identity,
     desired_endpoint_defaults,
     desired_endpoint_identity,
     desired_ip_range_defaults,
@@ -30,6 +34,7 @@ from .importers import (
 )
 from .loaders import IntentSourceEntry
 from .loaders import load_default_intent_sources, load_intent_sources
+from .production_inventory_contract import require_unique_reference
 
 try:
     from django.conf import settings
@@ -45,7 +50,9 @@ try:
         DesiredEndpoint,
         DesiredIPRange,
         DesiredNode,
+        DesiredNodeOperationalConfig,
         DesiredService,
+        DesiredServicePlacement,
         IntentEvaluation,
         IntentSource,
     )
@@ -142,95 +149,8 @@ else:
             if load_result.errors:
                 raise ValueError("Intent source catalog could not be loaded; see Job logs for details.")
 
-            seen_urls = set()
-            counts = {
-                "created": 0,
-                "updated": 0,
-                "unchanged": 0,
-                "disabled": 0,
-                "nodes_created": 0,
-                "nodes_updated": 0,
-                "nodes_unchanged": 0,
-                "ip_ranges_created": 0,
-                "ip_ranges_updated": 0,
-                "ip_ranges_unchanged": 0,
-                "endpoints_created": 0,
-                "endpoints_updated": 0,
-                "endpoints_unchanged": 0,
-            }
-            for source in load_result.intent_sources:
-                seen_urls.add(source.url)
-                defaults = intent_source_defaults(source)
-                obj, created = IntentSource.objects.get_or_create(url=source.url, defaults=defaults)
-                if created:
-                    counts["created"] += 1
-                elif _object_matches_defaults(obj, defaults):
-                    counts["unchanged"] += 1
-                else:
-                    for key, value in defaults.items():
-                        setattr(obj, key, value)
-                    obj.save(update_fields=tuple(defaults.keys()))
-                    counts["updated"] += 1
-
-            if disable_missing:
-                missing = IntentSource.objects.exclude(url__in=seen_urls).filter(enabled=True)
-                counts["disabled"] = missing.update(enabled=False)
-
-            source_by_key = _intent_source_lookup()
-            node_by_key = {}
-            for node in load_result.desired_nodes:
-                intent_source = source_by_key.get(node.intent_source) if node.intent_source else None
-                defaults = desired_node_defaults(node, intent_source_id=getattr(intent_source, "pk", None))
-                identity = desired_node_identity(node)
-                node_obj, created = DesiredNode.objects.get_or_create(**identity, defaults=defaults)
-                if created:
-                    counts["nodes_created"] += 1
-                elif _object_matches_defaults(obj=node_obj, defaults=defaults):
-                    counts["nodes_unchanged"] += 1
-                else:
-                    for key, value in defaults.items():
-                        setattr(node_obj, key, value)
-                    node_obj.save(update_fields=tuple(defaults.keys()))
-                    counts["nodes_updated"] += 1
-                node_by_key[node.slug] = node_obj
-                node_by_key[node.name] = node_obj
-
-            for ip_range in load_result.desired_ip_ranges:
-                defaults = desired_ip_range_defaults(ip_range)
-                identity = desired_ip_range_identity(ip_range)
-                ip_range_obj, created = DesiredIPRange.objects.get_or_create(**identity, defaults=defaults)
-                if created:
-                    counts["ip_ranges_created"] += 1
-                elif _object_matches_defaults(obj=ip_range_obj, defaults=defaults):
-                    counts["ip_ranges_unchanged"] += 1
-                else:
-                    for key, value in defaults.items():
-                        setattr(ip_range_obj, key, value)
-                    ip_range_obj.save(update_fields=tuple(defaults.keys()))
-                    counts["ip_ranges_updated"] += 1
-
-            if load_result.desired_endpoints:
-                existing_nodes = DesiredNode.objects.all()
-                for node_obj in existing_nodes:
-                    node_by_key.setdefault(node_obj.slug, node_obj)
-                    node_by_key.setdefault(node_obj.name, node_obj)
-
-            for endpoint in load_result.desired_endpoints:
-                desired_node = node_by_key.get(endpoint.desired_node)
-                if desired_node is None:
-                    raise ValueError(f"Desired endpoint references missing desired node: {endpoint.desired_node}")
-                identity = desired_endpoint_identity(endpoint, desired_node_id=desired_node.pk)
-                defaults = desired_endpoint_defaults(endpoint, desired_node=desired_node)
-                endpoint_obj, created = DesiredEndpoint.objects.get_or_create(**identity, defaults=defaults)
-                if created:
-                    counts["endpoints_created"] += 1
-                elif _object_matches_defaults(obj=endpoint_obj, defaults=defaults):
-                    counts["endpoints_unchanged"] += 1
-                else:
-                    for key, value in defaults.items():
-                        setattr(endpoint_obj, key, value)
-                    endpoint_obj.save(update_fields=tuple(defaults.keys()))
-                    counts["endpoints_updated"] += 1
+            with transaction.atomic():
+                counts = _import_intent_rows(load_result, disable_missing=disable_missing)
 
             self.logger.info(
                 "Intent source import summary: %s",
@@ -241,6 +161,10 @@ else:
                         "desired_nodes": len(load_result.desired_nodes),
                         "desired_ip_ranges": len(load_result.desired_ip_ranges),
                         "desired_endpoints": len(load_result.desired_endpoints),
+                        "desired_service_placements": len(load_result.desired_service_placements),
+                        "desired_node_operational_configs": len(
+                            load_result.desired_node_operational_configs
+                        ),
                         **counts,
                     }
                 ),
@@ -776,6 +700,162 @@ def _entry_from_intent_source(intent_source) -> IntentSourceEntry:
         basic_file_paths=list(source_config.get("basic_file_paths") or []),
         raw_url_template=source_config.get("raw_url_template"),
     )
+
+
+def _import_intent_rows(load_result, *, disable_missing: bool) -> dict:
+    """Apply one strict YAML document atomically and return idempotency counts."""
+
+    counts = {
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "disabled": 0,
+        "nodes_created": 0,
+        "nodes_updated": 0,
+        "nodes_unchanged": 0,
+        "ip_ranges_created": 0,
+        "ip_ranges_updated": 0,
+        "ip_ranges_unchanged": 0,
+        "endpoints_created": 0,
+        "endpoints_updated": 0,
+        "endpoints_unchanged": 0,
+        "placements_created": 0,
+        "placements_updated": 0,
+        "placements_unchanged": 0,
+        "operational_configs_created": 0,
+        "operational_configs_updated": 0,
+        "operational_configs_unchanged": 0,
+    }
+    seen_urls = set()
+    for source in load_result.intent_sources:
+        seen_urls.add(source.url)
+        status, _obj = _validated_upsert(
+            IntentSource,
+            {"url": source.url},
+            intent_source_defaults(source),
+        )
+        counts[status] += 1
+
+    if disable_missing:
+        missing = IntentSource.objects.exclude(url__in=seen_urls).filter(enabled=True)
+        counts["disabled"] = missing.update(enabled=False)
+
+    source_by_key = _intent_source_lookup()
+    for node in load_result.desired_nodes:
+        intent_source = source_by_key.get(node.intent_source) if node.intent_source else None
+        status, _obj = _validated_upsert(
+            DesiredNode,
+            desired_node_identity(node),
+            desired_node_defaults(node, intent_source_id=getattr(intent_source, "pk", None)),
+        )
+        counts[f"nodes_{status}"] += 1
+
+    for ip_range in load_result.desired_ip_ranges:
+        status, _obj = _validated_upsert(
+            DesiredIPRange,
+            desired_ip_range_identity(ip_range),
+            desired_ip_range_defaults(ip_range),
+        )
+        counts[f"ip_ranges_{status}"] += 1
+
+    for endpoint in load_result.desired_endpoints:
+        desired_node = _resolve_desired_node(endpoint.desired_node)
+        status, _obj = _validated_upsert(
+            DesiredEndpoint,
+            desired_endpoint_identity(endpoint, desired_node_id=desired_node.pk),
+            desired_endpoint_defaults(endpoint, desired_node=desired_node),
+        )
+        counts[f"endpoints_{status}"] += 1
+
+    for placement in load_result.desired_service_placements:
+        desired_service = _resolve_desired_service(placement.desired_service)
+        desired_node = _resolve_desired_node(placement.desired_node)
+        desired_endpoint = _resolve_desired_endpoint(
+            desired_node,
+            placement.desired_endpoint,
+            required=False,
+        )
+        status, _obj = _validated_upsert(
+            DesiredServicePlacement,
+            desired_service_placement_identity(placement, desired_service.pk),
+            desired_service_placement_defaults(
+                placement,
+                desired_node_id=desired_node.pk,
+                desired_endpoint_id=getattr(desired_endpoint, "pk", None),
+            ),
+        )
+        counts[f"placements_{status}"] += 1
+
+    for operational_config in load_result.desired_node_operational_configs:
+        desired_node = _resolve_desired_node(operational_config.desired_node)
+        local_endpoint = _resolve_desired_endpoint(
+            desired_node,
+            operational_config.local_endpoint,
+            required=False,
+        )
+        tailscale_endpoint = _resolve_desired_endpoint(
+            desired_node,
+            operational_config.tailscale_endpoint,
+            required=False,
+        )
+        status, _obj = _validated_upsert(
+            DesiredNodeOperationalConfig,
+            desired_node_operational_config_identity(operational_config, desired_node.pk),
+            desired_node_operational_config_defaults(
+                operational_config,
+                local_endpoint_id=getattr(local_endpoint, "pk", None),
+                tailscale_endpoint_id=getattr(tailscale_endpoint, "pk", None),
+            ),
+        )
+        counts[f"operational_configs_{status}"] += 1
+    return counts
+
+
+def _validated_upsert(model, identity: dict, defaults: dict):
+    queryset = model.objects.filter(**identity)
+    match_count = queryset.count()
+    if match_count > 1:
+        require_unique_reference(model.__name__, match_count)
+    obj = queryset.first() if match_count == 1 else model(**identity)
+    created = match_count == 0
+    if not created and _object_matches_defaults(obj, defaults):
+        return "unchanged", obj
+    for key, value in defaults.items():
+        setattr(obj, key, value)
+    obj.full_clean()
+    obj.save()
+    return ("created" if created else "updated"), obj
+
+
+def _resolve_desired_node(slug: str):
+    queryset = DesiredNode.objects.filter(slug=slug)
+    require_unique_reference("DesiredNode", queryset.count())
+    return queryset.get()
+
+
+def _resolve_desired_service(reference: dict[str, str]):
+    queryset = DesiredService.objects.filter(
+        intent_source__slug=reference["intent_source"],
+        catalog_namespace=reference["catalog_namespace"],
+        catalog_metadata_name=reference["catalog_metadata_name"],
+        service_type=reference["service_type"],
+    )
+    require_unique_reference("DesiredService", queryset.count())
+    return queryset.get()
+
+
+def _resolve_desired_endpoint(desired_node, reference, *, required: bool):
+    if reference is None:
+        if required:
+            raise ValueError("DesiredEndpoint reference is required.")
+        return None
+    queryset = DesiredEndpoint.objects.filter(
+        desired_node=desired_node,
+        name=reference["name"],
+        endpoint_type=reference["endpoint_type"],
+    )
+    require_unique_reference("DesiredEndpoint", queryset.count())
+    return queryset.get()
 
 
 def _intent_source_lookup() -> dict:

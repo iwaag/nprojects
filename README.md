@@ -2,8 +2,8 @@
 
 Nautobot App for importing and analyzing cluster intent. The current code
 supports intent sources, desired services, desired dependencies, desired nodes,
-desired endpoints, deterministic desired-vs-actual evaluations, and dnsmasq
-DNS/DHCP export. Planned work will add remediation review.
+desired endpoints, explicit service placements, typed node operational policy,
+deterministic desired-vs-actual evaluations, and dnsmasq DNS/DHCP export.
 
 ## Install
 
@@ -59,6 +59,8 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists generated `DesiredService` records from source analysis.
 - Persists normalized `DesiredDependency` rows from Backstage `spec.dependsOn`.
 - Persists `DesiredNode` and `DesiredEndpoint` rows from YAML.
+- Persists `DesiredServicePlacement` and `DesiredNodeOperationalConfig` rows
+  from strict environment YAML or Nautobot CRUD screens.
 - Provides `Quick Host Add` for creating one desired node and one primary endpoint from one Nautobot form.
 - Persists `IntentEvaluation` rows for desired-vs-actual gap data.
 - Evaluates desired services, desired nodes, and desired endpoints against
@@ -71,14 +73,16 @@ nautobot-server migrate nautobot_intent_catalog
 - Does not run remediation review yet.
 
 For the model intent and design boundaries behind `IntentSource`,
-`DesiredService`, `DesiredDependency`, `DesiredNode`, `DesiredEndpoint`, and
+`DesiredService`, `DesiredDependency`, `DesiredNode`, `DesiredEndpoint`,
+`DesiredServicePlacement`, `DesiredNodeOperationalConfig`, and
 `IntentEvaluation`, see [CONCEPT.md](CONCEPT.md).
 
 ## Intent Source YAML
 
-The loader accepts only the current `intent_sources`, `desired_nodes`, and
-`desired_endpoints` roots. Older input roots are not loaded by compatibility
-code.
+The loader accepts the current `intent_sources`, `desired_nodes`,
+`desired_endpoints`, `desired_ip_ranges`, `desired_service_placements`, and
+`desired_node_operational_configs` roots. It does not load renamed or legacy
+placement and operational-policy shapes.
 
 ```yaml
 intent_sources:
@@ -117,6 +121,37 @@ desired_endpoints:
     port: 443
     generate_dnsmasq: true
     dnsmasq_record_type: host_record
+
+desired_service_placements:
+  - desired_service:
+      intent_source: service
+      catalog_namespace: default
+      catalog_metadata_name: dnsmasq
+      service_type: service
+    instance_name: primary
+    desired_node: edge-router-1
+    desired_endpoint:
+      name: mgmt
+      endpoint_type: management
+    desired_state: active
+    instance_role: primary
+    deployment_profile: dnsmasq
+    config_schema_version: "1"
+    assignment_source: yaml
+    config:
+      dhcp_authoritative: true
+
+desired_node_operational_configs:
+  - desired_node: edge-router-1
+    actual_state_policy: required
+    expected_host_os: linux
+    connection_path: local
+    local_endpoint:
+      name: mgmt
+      endpoint_type: management
+    ansible_port: 22
+    power_control: wol
+    is_laptop: false
 ```
 
 For the common one-host/one-primary-endpoint case, YAML may omit `dns_name` and
@@ -160,16 +195,19 @@ acceptable Nautobot object types that may realize it. Use `node_type` for the
 intent catalog classification and `accepted_actual_types` for candidate matching
 and explicit realized-object validation.
 
-Manual conversion from an older YAML shape is intentionally mechanical: rename
-the top-level list key to `intent_sources` and keep each item field that still
-applies. Fields such as `catalog_paths`, `basic_file_paths`, and
-`raw_url_template` are stored in `IntentSource.source_config` after import.
-
-Desired endpoints must reference an existing desired node by node slug or name
-in the same YAML input. Missing node references are reported as deterministic
-validation errors. `DesiredEndpoint.ip_address` is stored as text so unrealized
+Desired endpoints and all new placement/operational records reference a desired
+node only by its globally unique slug. References may target a node already in
+the database or one declared earlier in the same atomic import. Missing and
+ambiguous references abort the entire import. `DesiredEndpoint.ip_address` is stored as text so unrealized
 intent can be captured before a Nautobot `IPAddress` exists; actual state is
 linked separately through `realized_ip_address`.
+
+Placement service references always include the IntentSource slug, catalog
+namespace, catalog metadata name, and service type. Endpoint references are
+always scoped to the selected node and contain both name and endpoint type.
+Unknown placement/operational fields, incomplete references, invalid policy
+combinations, list/scalar placement config, and non-boolean `is_laptop` values
+are rejected rather than coerced.
 
 ## Quick Host Add
 

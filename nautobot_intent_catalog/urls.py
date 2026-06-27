@@ -63,6 +63,56 @@ if hasattr(views, "IntentSourceListView"):
                 views.DesiredEndpointDeleteView.as_view(),
                 name="desiredendpoint_delete",
             ),
+            path(
+                "placements/",
+                views.DesiredServicePlacementListView.as_view(),
+                name="desiredserviceplacement_list",
+            ),
+            path(
+                "placements/add/",
+                views.DesiredServicePlacementEditView.as_view(),
+                name="desiredserviceplacement_add",
+            ),
+            path(
+                "placements/<uuid:pk>/",
+                views.DesiredServicePlacementView.as_view(),
+                name="desiredserviceplacement",
+            ),
+            path(
+                "placements/<uuid:pk>/edit/",
+                views.DesiredServicePlacementEditView.as_view(),
+                name="desiredserviceplacement_edit",
+            ),
+            path(
+                "placements/<uuid:pk>/delete/",
+                views.DesiredServicePlacementDeleteView.as_view(),
+                name="desiredserviceplacement_delete",
+            ),
+            path(
+                "operational-configs/",
+                views.DesiredNodeOperationalConfigListView.as_view(),
+                name="desirednodeoperationalconfig_list",
+            ),
+            path(
+                "operational-configs/add/",
+                views.DesiredNodeOperationalConfigEditView.as_view(),
+                name="desirednodeoperationalconfig_add",
+            ),
+            path(
+                "operational-configs/<uuid:pk>/",
+                views.DesiredNodeOperationalConfigView.as_view(),
+                name="desirednodeoperationalconfig",
+            ),
+            path(
+                "operational-configs/<uuid:pk>/edit/",
+                views.DesiredNodeOperationalConfigEditView.as_view(),
+                name="desirednodeoperationalconfig_edit",
+            ),
+            path(
+                "operational-configs/<uuid:pk>/delete/",
+                views.DesiredNodeOperationalConfigDeleteView.as_view(),
+                name="desirednodeoperationalconfig_delete",
+            ),
             path("ip-ranges/", views.DesiredIPRangeListView.as_view(), name="desirediprange_list"),
             path("ip-ranges/add/", views.DesiredIPRangeEditView.as_view(), name="desirediprange_add"),
             path("ip-ranges/<uuid:pk>/", views.DesiredIPRangeView.as_view(), name="desirediprange"),

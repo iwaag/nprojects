@@ -7,7 +7,14 @@ from dataclasses import asdict
 from typing import Any
 from urllib.parse import urlparse
 
-from .loaders import DesiredEndpointEntry, DesiredIPRangeEntry, DesiredNodeEntry, IntentSourceEntry
+from .loaders import (
+    DesiredEndpointEntry,
+    DesiredIPRangeEntry,
+    DesiredNodeEntry,
+    DesiredNodeOperationalConfigEntry,
+    DesiredServicePlacementEntry,
+    IntentSourceEntry,
+)
 from .names import default_dns_name, default_mdns_name
 
 
@@ -203,6 +210,67 @@ def desired_ip_range_defaults(ip_range: DesiredIPRangeEntry) -> dict[str, Any]:
         "generate_dnsmasq": ip_range.generate_dnsmasq,
         "dnsmasq_options": ip_range.dnsmasq_options,
         "description": ip_range.description,
+    }
+
+
+def desired_service_placement_identity(
+    placement: DesiredServicePlacementEntry,
+    desired_service_id: Any,
+) -> dict[str, Any]:
+    """Return the stable identity for one service instance."""
+
+    return {
+        "desired_service_id": desired_service_id,
+        "instance_name": placement.instance_name,
+    }
+
+
+def desired_service_placement_defaults(
+    placement: DesiredServicePlacementEntry,
+    desired_node_id: Any,
+    desired_endpoint_id: Any | None,
+) -> dict[str, Any]:
+    """Return placement-owned values without introducing Ansible group semantics."""
+
+    return {
+        "desired_node_id": desired_node_id,
+        "desired_endpoint_id": desired_endpoint_id,
+        "desired_state": placement.desired_state,
+        "instance_role": placement.instance_role,
+        "deployment_profile": placement.deployment_profile,
+        "config_schema_version": placement.config_schema_version,
+        "config": placement.config,
+        "assignment_source": placement.assignment_source,
+        "reason": placement.reason,
+    }
+
+
+def desired_node_operational_config_identity(
+    operational_config: DesiredNodeOperationalConfigEntry,
+    desired_node_id: Any,
+) -> dict[str, Any]:
+    """Return the one-to-one identity for desired node operational policy."""
+
+    return {"desired_node_id": desired_node_id}
+
+
+def desired_node_operational_config_defaults(
+    operational_config: DesiredNodeOperationalConfigEntry,
+    local_endpoint_id: Any | None,
+    tailscale_endpoint_id: Any | None,
+) -> dict[str, Any]:
+    """Return explicit typed execution-policy values."""
+
+    return {
+        "actual_state_policy": operational_config.actual_state_policy,
+        "expected_host_os": operational_config.expected_host_os,
+        "declared_host_os": operational_config.declared_host_os,
+        "connection_path": operational_config.connection_path,
+        "local_endpoint_id": local_endpoint_id,
+        "tailscale_endpoint_id": tailscale_endpoint_id,
+        "ansible_port": operational_config.ansible_port,
+        "power_control": operational_config.power_control,
+        "is_laptop": operational_config.is_laptop,
     }
 
 

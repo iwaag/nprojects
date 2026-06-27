@@ -11,7 +11,9 @@ try:
         DesiredEndpoint,
         DesiredIPRange,
         DesiredNode,
+        DesiredNodeOperationalConfig,
         DesiredService,
+        DesiredServicePlacement,
         IntentEvaluation,
         IntentSource,
     )
@@ -52,8 +54,6 @@ else:
                 "last_imported_at",
                 "actions",
             )
-
-
     class DesiredServiceTable(BaseTable):
         """Desired service list table."""
 
@@ -208,6 +208,59 @@ else:
                 "generate_dnsmasq",
                 "actions",
             )
+
+
+    class DesiredServicePlacementTable(BaseTable):
+        """Explicit desired service placement list table."""
+
+        pk = ToggleColumn()
+        instance_name = tables.LinkColumn()
+        desired_service = tables.LinkColumn()
+        desired_node = tables.LinkColumn()
+        desired_endpoint = tables.LinkColumn()
+        actions = ButtonsColumn(DesiredServicePlacement, buttons=TABLE_ACTION_BUTTONS)
+
+        class Meta(BaseTable.Meta):
+            model = DesiredServicePlacement
+            fields = (
+                "pk",
+                "desired_service",
+                "instance_name",
+                "desired_node",
+                "desired_endpoint",
+                "desired_state",
+                "instance_role",
+                "deployment_profile",
+                "config_schema_version",
+                "assignment_source",
+                "actions",
+            )
+            default_columns = fields
+
+
+    class DesiredNodeOperationalConfigTable(BaseTable):
+        """Desired node operational policy list table."""
+
+        pk = ToggleColumn()
+        desired_node = tables.LinkColumn()
+        actual_state_policy = tables.LinkColumn()
+        actions = ButtonsColumn(DesiredNodeOperationalConfig, buttons=TABLE_ACTION_BUTTONS)
+
+        class Meta(BaseTable.Meta):
+            model = DesiredNodeOperationalConfig
+            fields = (
+                "pk",
+                "desired_node",
+                "actual_state_policy",
+                "expected_host_os",
+                "declared_host_os",
+                "connection_path",
+                "ansible_port",
+                "power_control",
+                "is_laptop",
+                "actions",
+            )
+            default_columns = fields
 
 
     class DesiredIPRangeTable(BaseTable):

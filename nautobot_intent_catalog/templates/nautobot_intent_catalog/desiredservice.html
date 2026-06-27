@@ -93,6 +93,20 @@
             </div>
 
             <div class="panel panel-default">
+                <div class="panel-heading"><strong>Desired Placements</strong></div>
+                {% with placements=object.placements.all %}
+                    {% if placements %}
+                        <table class="table table-hover table-headings">
+                            <thead><tr><th>Instance</th><th>Node</th><th>State</th><th>Profile</th></tr></thead>
+                            <tbody>{% for placement in placements %}<tr><td><a href="{{ placement.get_absolute_url }}">{{ placement.instance_name }}</a></td><td>{{ placement.desired_node }}</td><td>{{ placement.desired_state }}</td><td><code>{{ placement.deployment_profile }}</code></td></tr>{% endfor %}</tbody>
+                        </table>
+                    {% else %}
+                        <div class="panel-body">No desired placements are registered.</div>
+                    {% endif %}
+                {% endwith %}
+            </div>
+
+            <div class="panel panel-default">
                 <div class="panel-heading">
                     <strong>Desired Dependencies</strong>
                 </div>

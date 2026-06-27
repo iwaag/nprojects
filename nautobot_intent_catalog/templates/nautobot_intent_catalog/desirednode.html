@@ -55,6 +55,31 @@
             </div>
 
             <div class="panel panel-default">
+                <div class="panel-heading"><strong>Operational Config</strong></div>
+                <div class="panel-body">
+                    {% if object.operational_config %}
+                        <a href="{{ object.operational_config.get_absolute_url }}">{{ object.operational_config }}</a>
+                    {% else %}
+                        No operational config is registered.
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="panel panel-default">
+                <div class="panel-heading"><strong>Service Placements</strong></div>
+                {% with placements=object.service_placements.all %}
+                    {% if placements %}
+                        <table class="table table-hover table-headings">
+                            <thead><tr><th>Service</th><th>Instance</th><th>State</th><th>Profile</th></tr></thead>
+                            <tbody>{% for placement in placements %}<tr><td>{{ placement.desired_service }}</td><td><a href="{{ placement.get_absolute_url }}">{{ placement.instance_name }}</a></td><td>{{ placement.desired_state }}</td><td><code>{{ placement.deployment_profile }}</code></td></tr>{% endfor %}</tbody>
+                        </table>
+                    {% else %}
+                        <div class="panel-body">No service placements are registered.</div>
+                    {% endif %}
+                {% endwith %}
+            </div>
+
+            <div class="panel panel-default">
                 <div class="panel-heading">
                     <strong>Desired Endpoints</strong>
                 </div>

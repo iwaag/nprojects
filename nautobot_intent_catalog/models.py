@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+import ipaddress
+
+
+def _endpoint_has_usable_ip(endpoint) -> bool:
+    value = getattr(endpoint, "ip_address", None)
+    if not value:
+        return False
+    try:
+        ipaddress.ip_interface(str(value))
+    except ValueError:
+        return False
+    return True
+
+
+def _endpoint_is_usable_local(endpoint) -> bool:
+    return _endpoint_has_usable_ip(endpoint) or any(
+        str(getattr(endpoint, field_name, "") or "").strip()
+        for field_name in ("dns_name", "mdns_name")
+    )
+
 try:
     from django.core.exceptions import ValidationError
     from django.db import models
@@ -416,6 +436,274 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:desiredendpoint", args=[self.pk])
+
+
+    class DesiredServicePlacement(PrimaryModel):
+        """Desired binding of one service instance to one desired node."""
+
+        STATE_ACTIVE = "active"
+        STATE_DISABLED = "disabled"
+        DESIRED_STATE_CHOICES = (
+            (STATE_ACTIVE, "Active"),
+            (STATE_DISABLED, "Disabled"),
+        )
+
+        SOURCE_MANUAL = "manual"
+        SOURCE_YAML = "yaml"
+        SOURCE_POLICY = "policy"
+        SOURCE_GENERATED = "generated"
+        ASSIGNMENT_SOURCE_CHOICES = (
+            (SOURCE_MANUAL, "Manual"),
+            (SOURCE_YAML, "YAML"),
+            (SOURCE_POLICY, "Policy"),
+            (SOURCE_GENERATED, "Generated"),
+        )
+
+        desired_service = models.ForeignKey(
+            DesiredService,
+            on_delete=models.PROTECT,
+            related_name="placements",
+        )
+        desired_node = models.ForeignKey(
+            DesiredNode,
+            on_delete=models.PROTECT,
+            related_name="service_placements",
+        )
+        desired_endpoint = models.ForeignKey(
+            DesiredEndpoint,
+            on_delete=models.PROTECT,
+            blank=True,
+            null=True,
+            related_name="service_placements",
+        )
+        instance_name = models.SlugField(max_length=255)
+        desired_state = models.CharField(
+            max_length=32,
+            choices=DESIRED_STATE_CHOICES,
+            default=STATE_ACTIVE,
+        )
+        instance_role = models.CharField(max_length=64, blank=True, null=True)
+        deployment_profile = models.SlugField(max_length=255)
+        config_schema_version = models.CharField(max_length=64)
+        config = models.JSONField(default=dict, blank=True)
+        assignment_source = models.CharField(
+            max_length=32,
+            choices=ASSIGNMENT_SOURCE_CHOICES,
+            default=SOURCE_MANUAL,
+        )
+        reason = models.TextField(blank=True, null=True)
+
+        class Meta:
+            ordering = ("desired_service__name", "instance_name")
+            verbose_name = "desired service placement"
+            verbose_name_plural = "desired service placements"
+            constraints = (
+                models.UniqueConstraint(
+                    fields=("desired_service", "instance_name"),
+                    name="nic_unique_service_instance",
+                ),
+                models.CheckConstraint(
+                    check=~models.Q(deployment_profile=""),
+                    name="nic_placement_profile_nonempty",
+                ),
+                models.CheckConstraint(
+                    check=~models.Q(config_schema_version=""),
+                    name="nic_placement_schema_nonempty",
+                ),
+                models.CheckConstraint(
+                    check=models.expressions.RawSQL(
+                        "jsonb_typeof(config) = 'object'",
+                        (),
+                        output_field=models.BooleanField(),
+                    ),
+                    name="nic_placement_config_object",
+                ),
+            )
+
+        def __str__(self) -> str:
+            return f"{self.desired_service}:{self.instance_name} on {self.desired_node}"
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:desiredserviceplacement", args=[self.pk])
+
+        def clean(self):
+            """Validate placement-owned values and endpoint ownership."""
+
+            super().clean()
+            errors = {}
+            if not str(self.deployment_profile or "").strip():
+                errors["deployment_profile"] = "Deployment profile must be non-empty."
+            if not str(self.config_schema_version or "").strip():
+                errors["config_schema_version"] = "Config schema version must be non-empty."
+            if not isinstance(self.config, dict):
+                errors["config"] = "Placement config must be a JSON object."
+            if (
+                self.desired_endpoint_id
+                and self.desired_node_id
+                and self.desired_endpoint.desired_node_id != self.desired_node_id
+            ):
+                errors["desired_endpoint"] = "Selected endpoint must belong to the placement node."
+            if errors:
+                raise ValidationError(errors)
+
+
+    class DesiredNodeOperationalConfig(PrimaryModel):
+        """Explicit non-service execution policy for one desired node."""
+
+        ACTUAL_REQUIRED = "required"
+        ACTUAL_DECLARED = "declared"
+        ACTUAL_STATE_POLICY_CHOICES = (
+            (ACTUAL_REQUIRED, "Required"),
+            (ACTUAL_DECLARED, "Declared"),
+        )
+
+        HOST_OS_LINUX = "linux"
+        HOST_OS_MACOS = "macos"
+        EXPECTED_HOST_OS_CHOICES = (
+            (HOST_OS_LINUX, "Linux"),
+            (HOST_OS_MACOS, "macOS"),
+        )
+
+        HOST_OS_HAOS = "haos"
+        DECLARED_HOST_OS_CHOICES = ((HOST_OS_HAOS, "Home Assistant OS"),)
+
+        CONNECTION_LOCAL = "local"
+        CONNECTION_TAILSCALE = "tailscale"
+        CONNECTION_PATH_CHOICES = (
+            (CONNECTION_LOCAL, "Local"),
+            (CONNECTION_TAILSCALE, "Tailscale"),
+        )
+
+        POWER_NONE = "none"
+        POWER_WOL = "wol"
+        POWER_MACOS_SLEEP = "macos_sleep"
+        POWER_CONTROL_CHOICES = (
+            (POWER_NONE, "None"),
+            (POWER_WOL, "Wake-on-LAN"),
+            (POWER_MACOS_SLEEP, "macOS sleep"),
+        )
+
+        desired_node = models.OneToOneField(
+            DesiredNode,
+            on_delete=models.PROTECT,
+            related_name="operational_config",
+        )
+        actual_state_policy = models.CharField(
+            max_length=32,
+            choices=ACTUAL_STATE_POLICY_CHOICES,
+        )
+        expected_host_os = models.CharField(
+            max_length=32,
+            choices=EXPECTED_HOST_OS_CHOICES,
+            blank=True,
+            null=True,
+        )
+        declared_host_os = models.CharField(
+            max_length=32,
+            choices=DECLARED_HOST_OS_CHOICES,
+            blank=True,
+            null=True,
+        )
+        connection_path = models.CharField(
+            max_length=32,
+            choices=CONNECTION_PATH_CHOICES,
+        )
+        local_endpoint = models.ForeignKey(
+            DesiredEndpoint,
+            on_delete=models.PROTECT,
+            blank=True,
+            null=True,
+            related_name="local_operational_configs",
+        )
+        tailscale_endpoint = models.ForeignKey(
+            DesiredEndpoint,
+            on_delete=models.PROTECT,
+            blank=True,
+            null=True,
+            related_name="tailscale_operational_configs",
+        )
+        ansible_port = models.PositiveIntegerField(blank=True, null=True)
+        power_control = models.CharField(
+            max_length=32,
+            choices=POWER_CONTROL_CHOICES,
+            default=POWER_NONE,
+        )
+        is_laptop = models.BooleanField(default=False)
+
+        class Meta:
+            ordering = ("desired_node__name",)
+            verbose_name = "desired node operational config"
+            verbose_name_plural = "desired node operational configs"
+            constraints = (
+                models.CheckConstraint(
+                    check=(
+                        models.Q(
+                            actual_state_policy="required",
+                            expected_host_os__in=("linux", "macos"),
+                            declared_host_os__isnull=True,
+                        )
+                        | models.Q(
+                            actual_state_policy="declared",
+                            expected_host_os__isnull=True,
+                            declared_host_os="haos",
+                        )
+                    ),
+                    name="nic_operational_host_os_policy",
+                ),
+            )
+
+        def __str__(self) -> str:
+            return f"{self.desired_node} operational config"
+
+        def get_absolute_url(self) -> str:
+            return reverse("plugins:nautobot_intent_catalog:desirednodeoperationalconfig", args=[self.pk])
+
+        def clean(self):
+            """Validate policy-dependent fields, endpoint ownership, and safe power policy."""
+
+            super().clean()
+            errors = {}
+            if self.actual_state_policy == self.ACTUAL_REQUIRED:
+                if self.expected_host_os not in {self.HOST_OS_LINUX, self.HOST_OS_MACOS}:
+                    errors["expected_host_os"] = "Required actual state needs expected_host_os=linux or macos."
+                if self.declared_host_os is not None:
+                    errors["declared_host_os"] = "Required actual state forbids declared_host_os."
+                platform = self.expected_host_os
+            elif self.actual_state_policy == self.ACTUAL_DECLARED:
+                if self.declared_host_os != self.HOST_OS_HAOS:
+                    errors["declared_host_os"] = "Declared actual state supports only declared_host_os=haos."
+                if self.expected_host_os is not None:
+                    errors["expected_host_os"] = "Declared actual state forbids expected_host_os."
+                platform = self.declared_host_os
+            else:
+                platform = None
+
+            for field_name in ("local_endpoint", "tailscale_endpoint"):
+                endpoint_id = getattr(self, f"{field_name}_id")
+                if endpoint_id and self.desired_node_id:
+                    endpoint = getattr(self, field_name)
+                    if endpoint.desired_node_id != self.desired_node_id:
+                        errors[field_name] = "Selected endpoint must belong to the configured node."
+
+            if self.connection_path == self.CONNECTION_TAILSCALE:
+                if not self.tailscale_endpoint_id or not _endpoint_has_usable_ip(self.tailscale_endpoint):
+                    errors["tailscale_endpoint"] = "Tailscale connection requires an endpoint with a valid IP address."
+            if self.actual_state_policy == self.ACTUAL_DECLARED and self.connection_path == self.CONNECTION_LOCAL:
+                if not self.local_endpoint_id or not _endpoint_is_usable_local(self.local_endpoint):
+                    errors["local_endpoint"] = "Declared local connection requires an endpoint with an IP, DNS, or mDNS address."
+
+            allowed_power = {
+                self.HOST_OS_LINUX: {self.POWER_NONE, self.POWER_WOL},
+                self.HOST_OS_MACOS: {self.POWER_NONE, self.POWER_MACOS_SLEEP},
+                self.HOST_OS_HAOS: {self.POWER_NONE},
+            }
+            if platform in allowed_power and self.power_control not in allowed_power[platform]:
+                errors["power_control"] = f"Power control {self.power_control!r} is invalid for {platform}."
+
+            if self.ansible_port is not None and not 1 <= self.ansible_port <= 65535:
+                errors["ansible_port"] = "Ansible port must be between 1 and 65535."
+            if errors:
+                raise ValidationError(errors)
 
 
     class DesiredIPRange(PrimaryModel):

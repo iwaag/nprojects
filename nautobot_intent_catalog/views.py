@@ -16,7 +16,9 @@ try:
         DesiredEndpointFilterSet,
         DesiredIPRangeFilterSet,
         DesiredNodeFilterSet,
+        DesiredNodeOperationalConfigFilterSet,
         DesiredServiceFilterSet,
+        DesiredServicePlacementFilterSet,
         IntentEvaluationFilterSet,
         IntentSourceFilterSet,
     )
@@ -26,18 +28,32 @@ try:
         DesiredHostQuickAddForm,
         DesiredIPRangeForm,
         DesiredNodeForm,
+        DesiredNodeOperationalConfigForm,
         DesiredServiceForm,
+        DesiredServicePlacementForm,
         IntentEvaluationForm,
         IntentSourceForm,
     )
-    from .models import DesiredDependency, DesiredEndpoint, DesiredIPRange, DesiredNode, DesiredService, IntentEvaluation, IntentSource
+    from .models import (
+        DesiredDependency,
+        DesiredEndpoint,
+        DesiredIPRange,
+        DesiredNode,
+        DesiredNodeOperationalConfig,
+        DesiredService,
+        DesiredServicePlacement,
+        IntentEvaluation,
+        IntentSource,
+    )
     from .operations import create_desired_node_with_primary_endpoint
     from .tables import (
         DesiredDependencyTable,
         DesiredEndpointTable,
         DesiredIPRangeTable,
         DesiredNodeTable,
+        DesiredNodeOperationalConfigTable,
         DesiredServiceTable,
+        DesiredServicePlacementTable,
         IntentEvaluationTable,
         IntentSourceTable,
     )
@@ -205,6 +221,76 @@ else:
         queryset = DesiredEndpoint.objects.all()
 
 
+    class DesiredServicePlacementListView(ObjectListView):
+        """List explicit desired service placements."""
+
+        queryset = DesiredServicePlacement.objects.select_related(
+            "desired_service",
+            "desired_node",
+            "desired_endpoint",
+        )
+        filterset = DesiredServicePlacementFilterSet
+        table = DesiredServicePlacementTable
+
+
+    class DesiredServicePlacementView(ObjectView):
+        """Show one explicit desired service placement."""
+
+        queryset = DesiredServicePlacement.objects.select_related(
+            "desired_service",
+            "desired_node",
+            "desired_endpoint",
+        )
+
+
+    class DesiredServicePlacementEditView(ObjectEditView):
+        """Create or edit an explicit desired service placement."""
+
+        queryset = DesiredServicePlacement.objects.all()
+        model_form = DesiredServicePlacementForm
+
+
+    class DesiredServicePlacementDeleteView(ObjectDeleteView):
+        """Delete an explicit desired service placement."""
+
+        queryset = DesiredServicePlacement.objects.all()
+
+
+    class DesiredNodeOperationalConfigListView(ObjectListView):
+        """List desired node operational policies."""
+
+        queryset = DesiredNodeOperationalConfig.objects.select_related(
+            "desired_node",
+            "local_endpoint",
+            "tailscale_endpoint",
+        )
+        filterset = DesiredNodeOperationalConfigFilterSet
+        table = DesiredNodeOperationalConfigTable
+
+
+    class DesiredNodeOperationalConfigView(ObjectView):
+        """Show one desired node operational policy."""
+
+        queryset = DesiredNodeOperationalConfig.objects.select_related(
+            "desired_node",
+            "local_endpoint",
+            "tailscale_endpoint",
+        )
+
+
+    class DesiredNodeOperationalConfigEditView(ObjectEditView):
+        """Create or edit desired node operational policy."""
+
+        queryset = DesiredNodeOperationalConfig.objects.all()
+        model_form = DesiredNodeOperationalConfigForm
+
+
+    class DesiredNodeOperationalConfigDeleteView(ObjectDeleteView):
+        """Delete desired node operational policy."""
+
+        queryset = DesiredNodeOperationalConfig.objects.all()
+
+
     class DesiredIPRangeListView(ObjectListView):
         """List desired IP range records."""
 
@@ -285,6 +371,8 @@ def source_yaml_intent_source_list(request):
             "desired_nodes": result.desired_nodes,
             "desired_ip_ranges": result.desired_ip_ranges,
             "desired_endpoints": result.desired_endpoints,
+            "desired_service_placements": result.desired_service_placements,
+            "desired_node_operational_configs": result.desired_node_operational_configs,
             "errors": result.errors,
         },
     )

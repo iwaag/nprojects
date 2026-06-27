@@ -11,12 +11,23 @@ from nautobot_intent_catalog.importers import (
     desired_ip_range_identity,
     desired_node_defaults,
     desired_node_identity,
+    desired_node_operational_config_defaults,
+    desired_node_operational_config_identity,
     desired_service_defaults,
     desired_service_dependencies,
     desired_service_identity,
+    desired_service_placement_defaults,
+    desired_service_placement_identity,
     intent_source_defaults,
 )
-from nautobot_intent_catalog.loaders import DesiredEndpointEntry, DesiredIPRangeEntry, DesiredNodeEntry, IntentSourceEntry
+from nautobot_intent_catalog.loaders import (
+    DesiredEndpointEntry,
+    DesiredIPRangeEntry,
+    DesiredNodeEntry,
+    DesiredNodeOperationalConfigEntry,
+    DesiredServicePlacementEntry,
+    IntentSourceEntry,
+)
 
 
 class ImporterTests(unittest.TestCase):
@@ -272,6 +283,78 @@ class ImporterTests(unittest.TestCase):
             },
         )
 
+    def test_placement_identity_and_defaults_are_separate_from_service_analysis(self) -> None:
+        placement = DesiredServicePlacementEntry(
+            desired_service={
+                "intent_source": "infrastructure",
+                "catalog_namespace": "default",
+                "catalog_metadata_name": "dnsmasq",
+                "service_type": "service",
+            },
+            instance_name="primary",
+            desired_node="agdns01",
+            desired_endpoint={"name": "primary", "endpoint_type": "primary"},
+            desired_state="active",
+            instance_role="primary",
+            deployment_profile="dnsmasq",
+            config_schema_version="1",
+            config={"dhcp_authoritative": True},
+            assignment_source="yaml",
+            reason="primary DNS",
+        )
+
+        self.assertEqual(
+            desired_service_placement_identity(placement, "service-id"),
+            {"desired_service_id": "service-id", "instance_name": "primary"},
+        )
+        self.assertEqual(
+            desired_service_placement_defaults(placement, "node-id", "endpoint-id"),
+            {
+                "desired_node_id": "node-id",
+                "desired_endpoint_id": "endpoint-id",
+                "desired_state": "active",
+                "instance_role": "primary",
+                "deployment_profile": "dnsmasq",
+                "config_schema_version": "1",
+                "config": {"dhcp_authoritative": True},
+                "assignment_source": "yaml",
+                "reason": "primary DNS",
+            },
+        )
+        self.assertNotIn("placements", desired_service_defaults({"name": "dnsmasq"}))
+
+    def test_operational_config_identity_and_defaults(self) -> None:
+        operational = DesiredNodeOperationalConfigEntry(
+            desired_node="agmac01",
+            actual_state_policy="required",
+            expected_host_os="macos",
+            declared_host_os=None,
+            connection_path="local",
+            local_endpoint=None,
+            tailscale_endpoint=None,
+            ansible_port=22,
+            power_control="macos_sleep",
+            is_laptop=True,
+        )
+
+        self.assertEqual(
+            desired_node_operational_config_identity(operational, "node-id"),
+            {"desired_node_id": "node-id"},
+        )
+        self.assertEqual(
+            desired_node_operational_config_defaults(operational, None, None),
+            {
+                "actual_state_policy": "required",
+                "expected_host_os": "macos",
+                "declared_host_os": None,
+                "connection_path": "local",
+                "local_endpoint_id": None,
+                "tailscale_endpoint_id": None,
+                "ansible_port": 22,
+                "power_control": "macos_sleep",
+                "is_laptop": True,
+            },
+        )
 
 if __name__ == "__main__":
     unittest.main()

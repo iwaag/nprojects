@@ -202,6 +202,54 @@
                     </div>
                 </div>
             {% endif %}
+
+            <h2>Desired Service Placements</h2>
+            {% if desired_service_placements %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead><tr><th>Service</th><th>Instance</th><th>Node</th><th>State</th><th>Profile</th><th>Schema</th><th>Source</th></tr></thead>
+                        <tbody>
+                            {% for placement in desired_service_placements %}
+                                <tr>
+                                    <td><code>{{ placement.desired_service }}</code></td>
+                                    <td>{{ placement.instance_name }}</td>
+                                    <td><code>{{ placement.desired_node }}</code></td>
+                                    <td>{{ placement.desired_state }}</td>
+                                    <td><code>{{ placement.deployment_profile }}</code></td>
+                                    <td>{{ placement.config_schema_version }}</td>
+                                    <td>{{ placement.assignment_source }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default"><div class="panel-body">No desired service placements are registered.</div></div>
+            {% endif %}
+
+            <h2>Desired Node Operational Configs</h2>
+            {% if desired_node_operational_configs %}
+                <div class="table-responsive">
+                    <table class="table table-hover table-headings">
+                        <thead><tr><th>Node</th><th>Actual Policy</th><th>Expected OS</th><th>Declared OS</th><th>Connection</th><th>Power</th><th>Laptop</th></tr></thead>
+                        <tbody>
+                            {% for config in desired_node_operational_configs %}
+                                <tr>
+                                    <td><code>{{ config.desired_node }}</code></td>
+                                    <td>{{ config.actual_state_policy }}</td>
+                                    <td>{{ config.expected_host_os|default:"-" }}</td>
+                                    <td>{{ config.declared_host_os|default:"-" }}</td>
+                                    <td>{{ config.connection_path }}</td>
+                                    <td>{{ config.power_control }}</td>
+                                    <td>{{ config.is_laptop|yesno:"Yes,No" }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="panel panel-default"><div class="panel-body">No desired node operational configs are registered.</div></div>
+            {% endif %}
         </div>
     </div>
 </div>

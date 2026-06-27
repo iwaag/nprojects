@@ -12,7 +12,9 @@ try:
         DesiredEndpoint,
         DesiredIPRange,
         DesiredNode,
+        DesiredNodeOperationalConfig,
         DesiredService,
+        DesiredServicePlacement,
         IntentEvaluation,
         IntentSource,
     )
@@ -218,6 +220,45 @@ else:
                 "dnsmasq_record_type",
                 "realized_ip_address",
                 "description",
+            )
+
+
+    class DesiredServicePlacementForm(NautobotModelForm):
+        """Create or edit an explicit desired service placement."""
+
+        class Meta:
+            model = DesiredServicePlacement
+            fields = (
+                "desired_service",
+                "instance_name",
+                "desired_node",
+                "desired_endpoint",
+                "desired_state",
+                "instance_role",
+                "deployment_profile",
+                "config_schema_version",
+                "config",
+                "assignment_source",
+                "reason",
+            )
+
+
+    class DesiredNodeOperationalConfigForm(NautobotModelForm):
+        """Create or edit desired node execution policy."""
+
+        class Meta:
+            model = DesiredNodeOperationalConfig
+            fields = (
+                "desired_node",
+                "actual_state_policy",
+                "expected_host_os",
+                "declared_host_os",
+                "connection_path",
+                "local_endpoint",
+                "tailscale_endpoint",
+                "ansible_port",
+                "power_control",
+                "is_laptop",
             )
 
 

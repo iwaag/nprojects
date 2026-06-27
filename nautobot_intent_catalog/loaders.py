@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import os
 import ipaddress
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .production_inventory_contract import (
+    ContractError,
+    canonical_json,
+    validate_desired_service_reference,
+    validate_endpoint_reference,
+)
 
 DEFAULT_INTENT_SOURCES_ENV = "NAUTOBOT_INTENT_SOURCES_FILE"
 DEFAULT_CATALOG_PATHS = ("catalog-info.yaml", "backstage/catalog-info.yaml")
@@ -89,6 +97,39 @@ class DesiredIPRangeEntry:
 
 
 @dataclass(frozen=True)
+class DesiredServicePlacementEntry:
+    """One explicit desired service placement normalized from YAML."""
+
+    desired_service: dict[str, str]
+    instance_name: str
+    desired_node: str
+    desired_endpoint: dict[str, str] | None
+    desired_state: str
+    instance_role: str | None
+    deployment_profile: str
+    config_schema_version: str
+    config: dict[str, Any]
+    assignment_source: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class DesiredNodeOperationalConfigEntry:
+    """One desired node execution-policy row normalized from YAML."""
+
+    desired_node: str
+    actual_state_policy: str
+    expected_host_os: str | None
+    declared_host_os: str | None
+    connection_path: str
+    local_endpoint: dict[str, str] | None
+    tailscale_endpoint: dict[str, str] | None
+    ansible_port: int | None
+    power_control: str
+    is_laptop: bool
+
+
+@dataclass(frozen=True)
 class IntentSourceLoadResult:
     """Result object returned by the YAML loader."""
 
@@ -97,6 +138,8 @@ class IntentSourceLoadResult:
     desired_nodes: list[DesiredNodeEntry] = field(default_factory=list)
     desired_ip_ranges: list[DesiredIPRangeEntry] = field(default_factory=list)
     desired_endpoints: list[DesiredEndpointEntry] = field(default_factory=list)
+    desired_service_placements: list[DesiredServicePlacementEntry] = field(default_factory=list)
+    desired_node_operational_configs: list[DesiredNodeOperationalConfigEntry] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -160,6 +203,8 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
     desired_nodes: list[DesiredNodeEntry] = []
     desired_ip_ranges: list[DesiredIPRangeEntry] = []
     desired_endpoints: list[DesiredEndpointEntry] = []
+    desired_service_placements: list[DesiredServicePlacementEntry] = []
+    desired_node_operational_configs: list[DesiredNodeOperationalConfigEntry] = []
     errors: list[str] = []
 
     raw_sources, source_errors = _list_section(data, "intent_sources")
@@ -194,7 +239,27 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
             desired_endpoints.append(entry)
         errors.extend(entry_errors)
 
-    errors.extend(_validate_endpoint_nodes(desired_nodes, desired_endpoints))
+    raw_placements, placement_errors = _list_section(data, "desired_service_placements")
+    errors.extend(placement_errors)
+    for index, item in enumerate(raw_placements, start=1):
+        entry, entry_errors = _normalize_desired_service_placement_entry(item, index)
+        if entry is not None:
+            desired_service_placements.append(entry)
+        errors.extend(entry_errors)
+
+    raw_operational_configs, operational_errors = _list_section(
+        data,
+        "desired_node_operational_configs",
+    )
+    errors.extend(operational_errors)
+    for index, item in enumerate(raw_operational_configs, start=1):
+        entry, entry_errors = _normalize_desired_node_operational_config_entry(item, index)
+        if entry is not None:
+            desired_node_operational_configs.append(entry)
+        errors.extend(entry_errors)
+
+    errors.extend(_duplicate_placement_errors(desired_service_placements))
+    errors.extend(_duplicate_operational_config_errors(desired_node_operational_configs))
 
     return IntentSourceLoadResult(
         source_path=source_path,
@@ -202,6 +267,8 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
         desired_nodes=desired_nodes,
         desired_ip_ranges=desired_ip_ranges,
         desired_endpoints=desired_endpoints,
+        desired_service_placements=desired_service_placements,
+        desired_node_operational_configs=desired_node_operational_configs,
         errors=errors,
     )
 
@@ -320,6 +387,8 @@ def _normalize_desired_endpoint_entry(item: Any, index: int) -> tuple[DesiredEnd
         errors.append(f"desired_endpoints entry {index} is missing required field: name.")
     if not desired_node:
         errors.append(f"desired_endpoints entry {index} is missing required field: desired_node.")
+    elif not _SLUG_RE.fullmatch(desired_node):
+        errors.append(f"desired_endpoints entry {index} desired_node must be a lowercase slug.")
     port, port_error = _optional_port(item.get("port"), index)
     if port_error:
         errors.append(port_error)
@@ -357,6 +426,221 @@ def _normalize_desired_endpoint_entry(item: Any, index: int) -> tuple[DesiredEnd
             ip_policy=ip_policy,
             dnsmasq_record_type=_choice(item.get("dnsmasq_record_type"), _DNSMASQ_RECORD_TYPES, "host_record"),
             description=_optional_str(item.get("description")),
+        ),
+        [],
+    )
+
+
+def _normalize_desired_service_placement_entry(
+    item: Any,
+    index: int,
+) -> tuple[DesiredServicePlacementEntry | None, list[str]]:
+    section = f"desired_service_placements entry {index}"
+    allowed = {
+        "desired_service",
+        "instance_name",
+        "desired_node",
+        "desired_endpoint",
+        "desired_state",
+        "instance_role",
+        "deployment_profile",
+        "config_schema_version",
+        "config",
+        "assignment_source",
+        "reason",
+    }
+    required = {
+        "desired_service",
+        "instance_name",
+        "desired_node",
+        "desired_state",
+        "deployment_profile",
+        "config_schema_version",
+        "config",
+        "assignment_source",
+    }
+    errors = _strict_mapping_errors(item, section, allowed, required)
+    if errors:
+        return None, errors
+
+    try:
+        desired_service = validate_desired_service_reference(item["desired_service"])
+    except ContractError as exc:
+        errors.append(f"{section} {exc}")
+        desired_service = {}
+
+    desired_endpoint = None
+    if item.get("desired_endpoint") is not None:
+        try:
+            desired_endpoint = validate_endpoint_reference(item["desired_endpoint"])
+        except ContractError as exc:
+            errors.append(f"{section} {exc}")
+
+    instance_name = _strict_slug(item.get("instance_name"), f"{section} instance_name", errors)
+    desired_node = _strict_slug(item.get("desired_node"), f"{section} desired_node", errors)
+    deployment_profile = _strict_slug(
+        item.get("deployment_profile"),
+        f"{section} deployment_profile",
+        errors,
+    )
+    config_schema_version = _strict_nonempty_string(
+        item.get("config_schema_version"),
+        f"{section} config_schema_version",
+        errors,
+    )
+    desired_state = _strict_choice(
+        item.get("desired_state"),
+        _PLACEMENT_STATES,
+        f"{section} desired_state",
+        errors,
+    )
+    assignment_source = _strict_choice(
+        item.get("assignment_source"),
+        _ASSIGNMENT_SOURCES,
+        f"{section} assignment_source",
+        errors,
+    )
+    config = item.get("config")
+    if not isinstance(config, dict):
+        errors.append(f"{section} config must be a mapping.")
+        config = {}
+    else:
+        try:
+            canonical_json(config)
+        except ContractError as exc:
+            errors.append(f"{section} config must be JSON-compatible with string mapping keys: {exc}")
+
+    instance_role = _strict_optional_string(item.get("instance_role"), f"{section} instance_role", errors)
+    reason = _strict_optional_string(item.get("reason"), f"{section} reason", errors)
+    if errors:
+        return None, errors
+    return (
+        DesiredServicePlacementEntry(
+            desired_service=desired_service,
+            instance_name=instance_name,
+            desired_node=desired_node,
+            desired_endpoint=desired_endpoint,
+            desired_state=desired_state,
+            instance_role=instance_role,
+            deployment_profile=deployment_profile,
+            config_schema_version=config_schema_version,
+            config=config,
+            assignment_source=assignment_source,
+            reason=reason,
+        ),
+        [],
+    )
+
+
+def _normalize_desired_node_operational_config_entry(
+    item: Any,
+    index: int,
+) -> tuple[DesiredNodeOperationalConfigEntry | None, list[str]]:
+    section = f"desired_node_operational_configs entry {index}"
+    allowed = {
+        "desired_node",
+        "actual_state_policy",
+        "expected_host_os",
+        "declared_host_os",
+        "connection_path",
+        "local_endpoint",
+        "tailscale_endpoint",
+        "ansible_port",
+        "power_control",
+        "is_laptop",
+    }
+    required = {
+        "desired_node",
+        "actual_state_policy",
+        "connection_path",
+        "power_control",
+        "is_laptop",
+    }
+    errors = _strict_mapping_errors(item, section, allowed, required)
+    if errors:
+        return None, errors
+
+    desired_node = _strict_slug(item.get("desired_node"), f"{section} desired_node", errors)
+    actual_state_policy = _strict_choice(
+        item.get("actual_state_policy"),
+        _ACTUAL_STATE_POLICIES,
+        f"{section} actual_state_policy",
+        errors,
+    )
+    connection_path = _strict_choice(
+        item.get("connection_path"),
+        _CONNECTION_PATHS,
+        f"{section} connection_path",
+        errors,
+    )
+    power_control = _strict_choice(
+        item.get("power_control"),
+        _POWER_CONTROLS,
+        f"{section} power_control",
+        errors,
+    )
+    expected_host_os = _strict_optional_choice(
+        item.get("expected_host_os"),
+        _EXPECTED_HOST_OS,
+        f"{section} expected_host_os",
+        errors,
+    )
+    declared_host_os = _strict_optional_choice(
+        item.get("declared_host_os"),
+        _DECLARED_HOST_OS,
+        f"{section} declared_host_os",
+        errors,
+    )
+
+    local_endpoint = _optional_endpoint_reference(item.get("local_endpoint"), section, "local_endpoint", errors)
+    tailscale_endpoint = _optional_endpoint_reference(
+        item.get("tailscale_endpoint"),
+        section,
+        "tailscale_endpoint",
+        errors,
+    )
+    ansible_port = _strict_optional_port(item.get("ansible_port"), f"{section} ansible_port", errors)
+    is_laptop = item.get("is_laptop")
+    if not isinstance(is_laptop, bool):
+        errors.append(f"{section} is_laptop must be a boolean.")
+        is_laptop = False
+
+    if actual_state_policy == "required":
+        if expected_host_os not in _EXPECTED_HOST_OS:
+            errors.append(f"{section} required policy needs expected_host_os=linux or macos.")
+        if declared_host_os is not None:
+            errors.append(f"{section} required policy forbids declared_host_os.")
+        platform = expected_host_os
+    elif actual_state_policy == "declared":
+        if declared_host_os != "haos":
+            errors.append(f"{section} declared policy needs declared_host_os=haos.")
+        if expected_host_os is not None:
+            errors.append(f"{section} declared policy forbids expected_host_os.")
+        platform = declared_host_os
+    else:
+        platform = None
+
+    if connection_path == "tailscale" and tailscale_endpoint is None:
+        errors.append(f"{section} tailscale connection requires tailscale_endpoint.")
+    if actual_state_policy == "declared" and connection_path == "local" and local_endpoint is None:
+        errors.append(f"{section} declared local connection requires local_endpoint.")
+    if platform in _POWER_BY_PLATFORM and power_control not in _POWER_BY_PLATFORM[platform]:
+        errors.append(f"{section} power_control {power_control!r} is invalid for {platform}.")
+
+    if errors:
+        return None, errors
+    return (
+        DesiredNodeOperationalConfigEntry(
+            desired_node=desired_node,
+            actual_state_policy=actual_state_policy,
+            expected_host_os=expected_host_os,
+            declared_host_os=declared_host_os,
+            connection_path=connection_path,
+            local_endpoint=local_endpoint,
+            tailscale_endpoint=tailscale_endpoint,
+            ansible_port=ansible_port,
+            power_control=power_control,
+            is_laptop=is_laptop,
         ),
         [],
     )
@@ -509,6 +793,117 @@ def _actual_types_or_error(value: Any, node_type: str, field_name: str) -> tuple
     return actual_types, None
 
 
+def _strict_mapping_errors(
+    value: Any,
+    section: str,
+    allowed: set[str],
+    required: set[str],
+) -> list[str]:
+    if not isinstance(value, dict):
+        return [f"{section} must be a mapping."]
+    unknown = sorted(str(key) for key in value if key not in allowed)
+    missing = sorted(key for key in required if key not in value)
+    errors = []
+    if unknown:
+        errors.append(f"{section} has unknown fields: {', '.join(unknown)}.")
+    if missing:
+        errors.append(f"{section} is missing required fields: {', '.join(missing)}.")
+    return errors
+
+
+def _strict_nonempty_string(value: Any, field_name: str, errors: list[str]) -> str:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{field_name} must be a non-empty string.")
+        return ""
+    return value.strip()
+
+
+def _strict_optional_string(value: Any, field_name: str, errors: list[str]) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        errors.append(f"{field_name} must be a string or null.")
+        return None
+    return value.strip() or None
+
+
+def _strict_slug(value: Any, field_name: str, errors: list[str]) -> str:
+    normalized = _strict_nonempty_string(value, field_name, errors)
+    if normalized and not _SLUG_RE.fullmatch(normalized):
+        errors.append(f"{field_name} must be a lowercase slug.")
+    return normalized
+
+
+def _strict_choice(value: Any, allowed: set[str], field_name: str, errors: list[str]) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        errors.append(f"{field_name} must be one of: {', '.join(sorted(allowed))}.")
+        return ""
+    return value
+
+
+def _strict_optional_choice(
+    value: Any,
+    allowed: set[str],
+    field_name: str,
+    errors: list[str],
+) -> str | None:
+    if value is None:
+        return None
+    return _strict_choice(value, allowed, field_name, errors) or None
+
+
+def _strict_optional_port(value: Any, field_name: str, errors: list[str]) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+        errors.append(f"{field_name} must be an integer between 1 and 65535.")
+        return None
+    return value
+
+
+def _optional_endpoint_reference(
+    value: Any,
+    section: str,
+    field_name: str,
+    errors: list[str],
+) -> dict[str, str] | None:
+    if value is None:
+        return None
+    try:
+        return validate_endpoint_reference(value)
+    except ContractError as exc:
+        errors.append(f"{section} {field_name} {exc}")
+        return None
+
+
+def _duplicate_placement_errors(entries: list[DesiredServicePlacementEntry]) -> list[str]:
+    seen = set()
+    errors = []
+    for entry in entries:
+        service_key = tuple(sorted(entry.desired_service.items()))
+        key = (service_key, entry.instance_name)
+        if key in seen:
+            errors.append(
+                "desired_service_placements contains duplicate desired_service and instance_name: "
+                f"{entry.instance_name}."
+            )
+        seen.add(key)
+    return errors
+
+
+def _duplicate_operational_config_errors(entries: list[DesiredNodeOperationalConfigEntry]) -> list[str]:
+    seen = set()
+    errors = []
+    for entry in entries:
+        if entry.desired_node in seen:
+            errors.append(
+                "desired_node_operational_configs contains duplicate desired_node: "
+                f"{entry.desired_node}."
+            )
+        seen.add(entry.desired_node)
+    return errors
+
+
 def _address_errors(value: str, field_name: str) -> list[str]:
     try:
         ipaddress.ip_address(value)
@@ -519,17 +914,6 @@ def _address_errors(value: str, field_name: str) -> list[str]:
 
 def _plain_mapping(value: dict[Any, Any]) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
-
-
-def _validate_endpoint_nodes(nodes: list[DesiredNodeEntry], endpoints: list[DesiredEndpointEntry]) -> list[str]:
-    node_keys = {node.slug for node in nodes} | {node.name for node in nodes}
-    errors = []
-    for endpoint in endpoints:
-        if endpoint.desired_node not in node_keys:
-            errors.append(
-                f"desired_endpoints entry {endpoint.name} references missing desired_node: {endpoint.desired_node}."
-            )
-    return errors
 
 
 def _slug_from_text(value: str, fallback: str) -> str:
@@ -560,3 +944,16 @@ _ENDPOINT_TYPES = {"primary", "management", "service", "vpn", "mdns", "other"}
 _DNSMASQ_RECORD_TYPES = {"host_record", "address", "cname"}
 _IP_POLICIES = {"static", "dhcp_reserved", "external"}
 _RANGE_POLICIES = {"static_pool", "dhcp_reservable_pool", "dhcp_dynamic_pool", "excluded"}
+_PLACEMENT_STATES = {"active", "disabled"}
+_ASSIGNMENT_SOURCES = {"manual", "yaml", "policy", "generated"}
+_ACTUAL_STATE_POLICIES = {"required", "declared"}
+_EXPECTED_HOST_OS = {"linux", "macos"}
+_DECLARED_HOST_OS = {"haos"}
+_CONNECTION_PATHS = {"local", "tailscale"}
+_POWER_CONTROLS = {"none", "wol", "macos_sleep"}
+_POWER_BY_PLATFORM = {
+    "linux": {"none", "wol"},
+    "macos": {"none", "macos_sleep"},
+    "haos": {"none"},
+}
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")

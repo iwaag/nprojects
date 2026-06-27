@@ -11,7 +11,9 @@ try:
         DesiredEndpoint,
         DesiredIPRange,
         DesiredNode,
+        DesiredNodeOperationalConfig,
         DesiredService,
+        DesiredServicePlacement,
         IntentEvaluation,
         IntentSource,
     )
@@ -143,6 +145,64 @@ else:
                 | queryset.filter(vpn_dns_name__icontains=value)
             )
 
+
+    class DesiredServicePlacementFilterSet(NautobotFilterSet):
+        """Filters for explicit desired service placements."""
+
+        q = django_filters.CharFilter(method="search", label="Search")
+
+        class Meta:
+            model = DesiredServicePlacement
+            fields = (
+                "id",
+                "desired_service",
+                "desired_node",
+                "desired_endpoint",
+                "instance_name",
+                "desired_state",
+                "instance_role",
+                "deployment_profile",
+                "config_schema_version",
+                "assignment_source",
+            )
+
+        def search(self, queryset, name, value):
+            if not value.strip():
+                return queryset
+            return (
+                queryset.filter(instance_name__icontains=value)
+                | queryset.filter(instance_role__icontains=value)
+                | queryset.filter(deployment_profile__icontains=value)
+            )
+
+
+    class DesiredNodeOperationalConfigFilterSet(NautobotFilterSet):
+        """Filters for desired node execution policy."""
+
+        q = django_filters.CharFilter(method="search", label="Search")
+
+        class Meta:
+            model = DesiredNodeOperationalConfig
+            fields = (
+                "id",
+                "desired_node",
+                "actual_state_policy",
+                "expected_host_os",
+                "declared_host_os",
+                "connection_path",
+                "local_endpoint",
+                "tailscale_endpoint",
+                "ansible_port",
+                "power_control",
+                "is_laptop",
+            )
+
+        def search(self, queryset, name, value):
+            if not value.strip():
+                return queryset
+            return queryset.filter(desired_node__name__icontains=value) | queryset.filter(
+                desired_node__slug__icontains=value
+            )
 
     class DesiredIPRangeFilterSet(NautobotFilterSet):
         """Filters for desired IP ranges."""

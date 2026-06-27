@@ -16,7 +16,9 @@ class ObjectViewTemplateTests(unittest.TestCase):
             "desiredendpoint.html",
             "desirediprange.html",
             "desirednode.html",
+            "desirednodeoperationalconfig.html",
             "desiredservice.html",
+            "desiredserviceplacement.html",
             "intentevaluation.html",
             "intentsource.html",
         }

@@ -14,6 +14,10 @@ Intent Catalog separates desired state into a few layers:
 - `DesiredNode`: a desired node intent, classified separately from the actual
   Nautobot object types that may realize it.
 - `DesiredEndpoint`: a desired IP/DNS/port-facing endpoint on a node.
+- `DesiredServicePlacement`: one explicitly desired service instance bound to a
+  desired node.
+- `DesiredNodeOperationalConfig`: typed non-service execution policy for one
+  desired node.
 - `IntentEvaluation`: persisted desired-vs-actual review data.
 
 The current implementation stores desired state and deterministic exports. It
@@ -159,10 +163,9 @@ desired_nodes:
       memory_gb: 4
 ```
 
-The current schema does not yet have a typed `parent_node` or `placement_node`
-relationship. Placement can be carried in `expected_spec` for now. A future
-self-referential relationship would be a natural extension if placement becomes
-important enough to query directly.
+Node hierarchy is separate from service placement. Service membership must not
+be stored in `expected_spec`; it is represented only by
+`DesiredServicePlacement`.
 
 A service host may intentionally allow several actual implementations. For
 example, a `dnsmasq` node can be classified as a service host while accepting a
@@ -179,10 +182,6 @@ desired_nodes:
       - container
     lifecycle: active
     role: dnsmasq
-    expected_spec:
-      availability: always_on
-      services:
-        - dnsmasq
 ```
 
 ## DesiredEndpoint
@@ -238,6 +237,34 @@ non-primary endpoints are not rewritten.
 The dnsmasq export is generated from eligible `DesiredEndpoint` rows. mDNS names
 are retained as metadata and are not exported as dnsmasq records.
 
+## DesiredServicePlacement
+
+`DesiredServicePlacement` is the operator-owned binding between one qualified
+`DesiredService` identity and one globally unique `DesiredNode.slug`. Its
+`deployment_profile` is a neutral key interpreted by the audited Ansible-side
+profile map; the model contains no Ansible group field.
+
+The stable identity is `(desired_service, instance_name)`. Repository analysis
+may refresh service metadata and dependencies, but does not own or replace
+placement rows. Optional endpoint references are resolved inside the selected
+node by `(name, endpoint_type)`. Placement `config` must be a JSON object and is
+validated against its deployment profile before production export; secrets do
+not belong in it.
+
+## DesiredNodeOperationalConfig
+
+`DesiredNodeOperationalConfig` is a one-to-one typed execution policy for a
+desired node. It declares actual-data requirements, expected or declared OS,
+connection selection, explicit endpoints, Ansible port, power policy, and
+laptop classification.
+
+`actual_state_policy=required` accepts only expected Linux or macOS and requires
+nodeutils-backed actual state. `actual_state_policy=declared` accepts only HAOS
+in schema 1.0 and does not permit `expected_host_os`. Tailscale connections need
+a selected endpoint with a valid IP. Declared local connections need a selected
+endpoint with an IP, DNS name, or mDNS name. Platform/power combinations are
+validated when the row is saved and again when production inventory is composed.
+
 ## IntentEvaluation
 
 `IntentEvaluation` stores persisted desired-vs-actual review data. It is the
@@ -278,11 +305,13 @@ evaluation facts to find interface and MAC candidates before dnsmasq export.
 
 These boundaries are intentional in the current implementation:
 
-- `DesiredService` and `DesiredNode` are not yet directly linked.
+- `DesiredService` and `DesiredNode` are linked only through explicit
+  `DesiredServicePlacement` instances; neither model embeds the other.
 - `DesiredDependency` rows are stored, but dependency satisfaction is not yet
   automatically evaluated.
-- `DesiredNode` / `DesiredEndpoint` can be imported, evaluated against Nautobot
-  actual objects, and exported to dnsmasq.
+- `DesiredNode`, `DesiredEndpoint`, `DesiredServicePlacement`, and
+  `DesiredNodeOperationalConfig` can be maintained through strict YAML import
+  or Nautobot CRUD screens.
 - `IntentEvaluation` has CRUD, schema support, and deterministic node,
   endpoint, and service evaluation jobs. Optional AI review is not implemented
   yet.
@@ -290,5 +319,5 @@ These boundaries are intentional in the current implementation:
   old URLs, old model names, old YAML root names, or old migrations.
 
 This means the app is currently useful as an intent inventory, service/dependency
-catalog, endpoint source for deterministic dnsmasq export, and storage surface
-for deterministic evaluations.
+catalog, explicit placement and execution-policy inventory, endpoint source for
+deterministic dnsmasq export, and storage surface for deterministic evaluations.
