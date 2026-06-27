@@ -211,6 +211,41 @@ class DeclaredHaosTests(unittest.TestCase):
         self.assertEqual(result.report["summary"]["active_placements"], 1)
 
 
+class MixedPlatformPipelineTests(unittest.TestCase):
+    def test_linux_macos_and_declared_haos_compose_together(self) -> None:
+        nodes = [
+            linux_node(
+                "aglinux",
+                placements=[PlacementInput("p-linux", "primary", "web", "1", config={"enabled": True})],
+            ),
+            linux_node(
+                "agmac",
+                expected="macos",
+                facts=linux_facts(
+                    system="Darwin",
+                    local_ip="192.168.0.11",
+                    mac="11:22:33:44:55:66",
+                    iface="en0",
+                ),
+            ),
+            haos_node(
+                placements=[PlacementInput("p-haos", "primary", "home_assistant", "1", config={})],
+            ),
+        ]
+
+        result = compose(nodes)
+
+        self.assertEqual(result.report["summary"]["included"], 3)
+        self.assertEqual(group_hosts(result, "ssh_hosts"), {"aglinux", "agmac", "aghaos"})
+        self.assertEqual(group_hosts(result, "linux"), {"aglinux"})
+        self.assertEqual(group_hosts(result, "macos"), {"agmac"})
+        self.assertEqual(group_hosts(result, "haos"), {"aghaos"})
+        self.assertEqual(group_hosts(result, "web_server"), {"aglinux"})
+        self.assertEqual(group_hosts(result, "haos_server"), {"aghaos"})
+        for hostname in group_hosts(result, "ssh_hosts"):
+            self.assertNotIn("package_manager", ssh_host(result, hostname))
+
+
 class SkipTaxonomyTests(unittest.TestCase):
     def test_missing_realized_device_is_skipped(self) -> None:
         result = compose([linux_node("agnodev", realized_type=None)])
