@@ -62,6 +62,11 @@ nautobot-server migrate nautobot_intent_catalog
 - Persists `DesiredServicePlacement` and `DesiredNodeOperationalConfig` rows
   from strict environment YAML or Nautobot CRUD screens.
 - Provides `Quick Host Add` for creating one desired node and one primary endpoint from one Nautobot form.
+- Provides `Quick Service Placement` for placing one service on one node from one
+  Nautobot form, with profile-derived config schema and `manual` assignment.
+- Projects the Ansible-owned `deployment_profiles` map into a read-only,
+  digest-keyed snapshot via the `Sync Deployment Profiles` Job for UI choices and
+  early validation.
 - Persists `IntentEvaluation` rows for desired-vs-actual gap data.
 - Evaluates desired services, desired nodes, and desired endpoints against
   deterministic state and Nautobot actual objects.
@@ -239,6 +244,66 @@ Use the normal `DesiredNode` and `DesiredEndpoint` CRUD screens when a host
 needs multiple endpoints, non-primary endpoint types, realized object links, or
 fine-grained endpoint edits. Use YAML import when the desired state should be
 managed from a source file or reviewed as a batch.
+
+## Quick Service Placement
+
+Use `Quick Service Placement` for the common case of placing one service on one
+node. It is available from the `Intent Catalog` navigation near `Service
+Placements`, directly at:
+
+```text
+/plugins/intent-catalog/placements/quick-add/
+```
+
+and as the `Place this service` button on a `DesiredService` detail page, which
+opens the form with that service preselected. Because `DesiredService` records
+are collected from intent sources and cannot be hand-created, starting from the
+service detail page removes the need to hunt for a service to reference.
+
+Quick Service Placement does not create a separate model. It writes one
+canonical `DesiredServicePlacement`, the same record used by YAML import and the
+normal CRUD screen. The operator only chooses what they actually decide:
+
+- the service (`desired_service`, preselected from the detail page)
+- the node (`desired_node`)
+- the deployment profile (`deployment_profile`)
+- the profile's config values (`config`)
+
+Other fields are derived or optional:
+
+- `config_schema_version` is **not** an operator input. It is derived from the
+  selected profile (the contract supports a single schema version).
+- `assignment_source` is fixed to `manual` so manual placements stay
+  distinguishable from future generated ones.
+- `instance_name` defaults to the service slug when left blank.
+- `desired_endpoint` is optional and limited to endpoints on the selected node.
+- `deployment_profile` is a dropdown sourced from the synced deployment-profiles
+  projection, and `config` fields are generated from that profile's `variables`
+  schema and validated against it before saving.
+
+The deployment-profiles projection must be synced first (see
+[deployment_profiles ownership](#deployment_profiles-ownership-and-sync)). Until
+then the form cannot offer profile choices or a config schema, so it shows a
+clear error asking you to run the sync Job rather than presenting an empty
+picker.
+
+The regular `DesiredServicePlacement` CRUD screen follows the same rule: it does
+not expose `config_schema_version` or `assignment_source` as hand-typed fields.
+Use YAML import when placements should be managed from a source file or reviewed
+as a batch.
+
+## deployment_profiles ownership and sync
+
+`deployment_profiles` are **owned by Ansible** (`ansible_agdev`
+`vars/deployment_profiles.yml`). Nautobot holds only a read-only projection used
+for UI choices and early validation; it never becomes an editable authoritative
+copy, and production inventory export still revalidates the map at export time.
+
+Run the `Sync Deployment Profiles` Job with the same canonical
+`deployment_profiles_json` + `deployment_profiles_digest` inputs passed to
+`Export Production Inventory`. The Job validates the input through the shared
+export-input contract and stores a single digest-keyed projection. Quick Service
+Placement reads this projection for profile choices and config schemas.
 
 ## dnsmasq Export
 

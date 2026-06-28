@@ -251,6 +251,21 @@ node by `(name, endpoint_type)`. Placement `config` must be a JSON object and is
 validated against its deployment profile before production export; secrets do
 not belong in it.
 
+`config_schema_version` and `assignment_source` are not operator inputs in the
+assisted paths. `config_schema_version` is derived from the selected profile (the
+contract supports a single schema version), and manual placement always records
+`assignment_source=manual`, keeping hand-made placements distinguishable from
+future generated ones. The Quick Service Placement form and the regular CRUD form
+both omit these as hand-typed fields; the placement operation derives/fixes them.
+`config` is validated against the selected profile's `variables` schema at form
+submission, not only at export time.
+
+The `deployment_profile` profile map stays owned by Ansible. Nautobot keeps only
+a read-only, digest-keyed projection synced through the same export-input
+contract, used for profile choices and early `config` validation. The projection
+is advisory: production inventory export still revalidates the map and records its
+digest, so an authoritative copy never lives in Nautobot.
+
 ## DesiredNodeOperationalConfig
 
 `DesiredNodeOperationalConfig` is a one-to-one typed execution policy for a

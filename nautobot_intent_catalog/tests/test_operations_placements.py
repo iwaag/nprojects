@@ -208,6 +208,25 @@ class PlacementOperationTests(unittest.TestCase):
         self.assertIn("instance_name", ctx.exception.message_dict)
         self.assertEqual(len(FakeDesiredServicePlacement.objects.rows), 1)
 
+    def test_optional_fields_pass_through(self) -> None:
+        result = self._create(
+            desired_state="disabled",
+            instance_role="primary",
+            reason="initial rollout",
+        )
+        placement = result.placement
+        self.assertEqual(placement.desired_state, "disabled")
+        self.assertEqual(placement.instance_role, "primary")
+        self.assertEqual(placement.reason, "initial rollout")
+
+    def test_derived_fields_are_not_operator_inputs(self) -> None:
+        # The operation does not accept the derived/fixed values as inputs, so an
+        # operator cannot hand-type config_schema_version or assignment_source.
+        with self.assertRaises(TypeError):
+            self._create(config_schema_version="1")
+        with self.assertRaises(TypeError):
+            self._create(assignment_source="policy")
+
 
 if __name__ == "__main__":
     unittest.main()
