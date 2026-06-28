@@ -34,6 +34,8 @@ from .importers import (
     desired_node_operational_config_identity,
     desired_service_defaults,
     desired_service_dependencies,
+    desired_service_entry_defaults,
+    desired_service_entry_identity,
     desired_service_identity,
     desired_service_placement_defaults,
     desired_service_placement_identity,
@@ -175,6 +177,7 @@ else:
                         "desired_nodes": len(load_result.desired_nodes),
                         "desired_ip_ranges": len(load_result.desired_ip_ranges),
                         "desired_endpoints": len(load_result.desired_endpoints),
+                        "desired_services": len(load_result.desired_services),
                         "desired_service_placements": len(load_result.desired_service_placements),
                         "desired_node_operational_configs": len(
                             load_result.desired_node_operational_configs
@@ -910,6 +913,9 @@ def _entry_from_intent_source(intent_source) -> IntentSourceEntry:
     source_config = intent_source.source_config or {}
     return IntentSourceEntry(
         url=intent_source.url,
+        slug=intent_source.slug,
+        name=intent_source.name,
+        source_type=intent_source.source_type,
         enabled=intent_source.enabled,
         ref=intent_source.ref,
         owner=intent_source.owner,
@@ -937,6 +943,9 @@ def _import_intent_rows(load_result, *, disable_missing: bool) -> dict:
         "endpoints_created": 0,
         "endpoints_updated": 0,
         "endpoints_unchanged": 0,
+        "services_created": 0,
+        "services_updated": 0,
+        "services_unchanged": 0,
         "placements_created": 0,
         "placements_updated": 0,
         "placements_unchanged": 0,
@@ -945,17 +954,24 @@ def _import_intent_rows(load_result, *, disable_missing: bool) -> dict:
         "operational_configs_unchanged": 0,
     }
     seen_urls = set()
+    seen_slugs = set()
     for source in load_result.intent_sources:
-        seen_urls.add(source.url)
-        status, _obj = _validated_upsert(
-            IntentSource,
-            {"url": source.url},
-            intent_source_defaults(source),
-        )
+        defaults = intent_source_defaults(source)
+        seen_slugs.add(defaults["slug"])
+        if source.source_type == "git_repository":
+            identity = {"url": source.url}
+            seen_urls.add(source.url)
+        else:
+            identity = {"slug": defaults["slug"]}
+        status, _obj = _validated_upsert(IntentSource, identity, defaults)
         counts[status] += 1
 
     if disable_missing:
-        missing = IntentSource.objects.exclude(url__in=seen_urls).filter(enabled=True)
+        missing = (
+            IntentSource.objects.filter(enabled=True)
+            .exclude(url__in=seen_urls)
+            .exclude(slug__in=seen_slugs)
+        )
         counts["disabled"] = missing.update(enabled=False)
 
     source_by_key = _intent_source_lookup()
@@ -984,6 +1000,19 @@ def _import_intent_rows(load_result, *, disable_missing: bool) -> dict:
             desired_endpoint_defaults(endpoint, desired_node=desired_node),
         )
         counts[f"endpoints_{status}"] += 1
+
+    for service in load_result.desired_services:
+        intent_source = source_by_key.get(service.intent_source)
+        if intent_source is None:
+            raise ValueError(
+                f"desired_services entry references unknown intent_source slug: {service.intent_source}."
+            )
+        status, _obj = _validated_upsert(
+            DesiredService,
+            desired_service_entry_identity(service, intent_source.pk),
+            desired_service_entry_defaults(service),
+        )
+        counts[f"services_{status}"] += 1
 
     for placement in load_result.desired_service_placements:
         desired_service = _resolve_desired_service(placement.desired_service)

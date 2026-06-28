@@ -15,6 +15,8 @@ from nautobot_intent_catalog.importers import (
     desired_node_operational_config_identity,
     desired_service_defaults,
     desired_service_dependencies,
+    desired_service_entry_defaults,
+    desired_service_entry_identity,
     desired_service_identity,
     desired_service_placement_defaults,
     desired_service_placement_identity,
@@ -25,6 +27,7 @@ from nautobot_intent_catalog.loaders import (
     DesiredIPRangeEntry,
     DesiredNodeEntry,
     DesiredNodeOperationalConfigEntry,
+    DesiredServiceEntry,
     DesiredServicePlacementEntry,
     IntentSourceEntry,
 )
@@ -355,6 +358,75 @@ class ImporterTests(unittest.TestCase):
                 "is_laptop": True,
             },
         )
+
+    def test_intent_source_defaults_for_manual_source(self) -> None:
+        source = IntentSourceEntry(
+            slug="infrastructure",
+            name="Infrastructure",
+            source_type="manual",
+            enabled=True,
+        )
+
+        defaults = intent_source_defaults(source)
+
+        self.assertEqual(defaults["slug"], "infrastructure")
+        self.assertEqual(defaults["name"], "Infrastructure")
+        self.assertEqual(defaults["source_type"], "manual")
+        self.assertNotIn("url", defaults)
+
+    def test_desired_service_entry_identity_and_defaults(self) -> None:
+        entry = DesiredServiceEntry(
+            intent_source="infrastructure",
+            catalog_metadata_name="prometheus",
+            service_type="service",
+            name="prometheus",
+            slug="prometheus",
+            display_name="Prometheus",
+            catalog_namespace="default",
+            lifecycle="active",
+            catalog_owner="platform",
+            min_memory_gb=2.0,
+            notes="fixed service",
+        )
+
+        self.assertEqual(
+            desired_service_entry_identity(entry, "source-id"),
+            {
+                "intent_source_id": "source-id",
+                "catalog_namespace": "default",
+                "catalog_metadata_name": "prometheus",
+                "service_type": "service",
+            },
+        )
+        self.assertEqual(
+            desired_service_entry_defaults(entry),
+            {
+                "name": "prometheus",
+                "slug": "prometheus",
+                "display_name": "Prometheus",
+                "lifecycle": "active",
+                "source_ref": None,
+                "source_catalog_path": None,
+                "catalog_kind": None,
+                "catalog_owner": "platform",
+                "catalog_lifecycle": None,
+                "prefers_gpu": False,
+                "min_memory_gb": 2.0,
+                "requirements": {},
+                "placement_policy": {},
+                "notes": "fixed service",
+            },
+        )
+
+    def test_intent_source_defaults_manual_falls_back_to_slug_name(self) -> None:
+        source = IntentSourceEntry(slug="infrastructure", source_type="manual")
+
+        defaults = intent_source_defaults(source)
+
+        self.assertEqual(defaults["slug"], "infrastructure")
+        self.assertEqual(defaults["name"], "infrastructure")
+        self.assertEqual(defaults["source_type"], "manual")
+
 
 if __name__ == "__main__":
     unittest.main()

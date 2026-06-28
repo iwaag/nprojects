@@ -383,5 +383,164 @@ class LoaderTests(unittest.TestCase):
         )
 
 
+    def test_loader_accepts_manual_intent_source_without_url(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "intent_sources:\n"
+                "  - slug: infrastructure\n"
+                "    name: Infrastructure\n"
+                "    source_type: manual\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(len(result.intent_sources), 1)
+        source = result.intent_sources[0]
+        self.assertIsNone(source.url)
+        self.assertEqual(source.slug, "infrastructure")
+        self.assertEqual(source.name, "Infrastructure")
+        self.assertEqual(source.source_type, "manual")
+
+    def test_loader_requires_slug_for_manual_intent_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "intent_sources:\n"
+                "  - source_type: manual\n"
+                "    name: Infrastructure\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertIn(
+            "intent_sources entry 1 is missing required field: slug.",
+            result.errors,
+        )
+
+    def test_loader_still_requires_url_for_git_intent_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "intent_sources:\n"
+                "  - name: service\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertIn("Entry 1 is missing required field: url.", result.errors)
+
+    def test_loader_parses_desired_services_block(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "intent_sources:\n"
+                "  - slug: infrastructure\n"
+                "    source_type: manual\n"
+                "desired_services:\n"
+                "  - intent_source: infrastructure\n"
+                "    catalog_metadata_name: prometheus\n"
+                "    service_type: service\n"
+                "    name: prometheus\n"
+                "    display_name: Prometheus\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(len(result.desired_services), 1)
+        service = result.desired_services[0]
+        self.assertEqual(service.intent_source, "infrastructure")
+        self.assertEqual(service.catalog_metadata_name, "prometheus")
+        self.assertEqual(service.service_type, "service")
+        self.assertEqual(service.name, "prometheus")
+        self.assertEqual(service.display_name, "Prometheus")
+        self.assertEqual(service.slug, "prometheus")
+        self.assertEqual(service.catalog_namespace, "default")
+        self.assertEqual(service.lifecycle, "proposed")
+
+    def test_loader_requires_desired_service_required_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_services:\n"
+                "  - intent_source: infrastructure\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertIn(
+            "desired_services entry 1 is missing required fields: "
+            "catalog_metadata_name, display_name, name, service_type.",
+            result.errors,
+        )
+
+    def test_loader_rejects_unknown_desired_service_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "desired_services:\n"
+                "  - intent_source: infrastructure\n"
+                "    catalog_metadata_name: prometheus\n"
+                "    service_type: service\n"
+                "    name: prometheus\n"
+                "    display_name: Prometheus\n"
+                "    bogus: nope\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertIn(
+            "desired_services entry 1 has unknown fields: bogus.",
+            result.errors,
+        )
+
+    def test_loader_detects_duplicate_desired_services(self) -> None:
+        entry = (
+            "  - intent_source: infrastructure\n"
+            "    catalog_metadata_name: prometheus\n"
+            "    service_type: service\n"
+            "    name: prometheus\n"
+            "    display_name: Prometheus\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text("desired_services:\n" + entry + entry, encoding="utf-8")
+
+            result = load_intent_sources(path)
+
+        self.assertIn(
+            "desired_services contains duplicate "
+            "(intent_source, catalog_namespace, catalog_metadata_name, service_type): "
+            "infrastructure/default/prometheus/service.",
+            result.errors,
+        )
+
+    def test_loader_rejects_unknown_intent_source_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "intent_sources.yaml"
+            path.write_text(
+                "intent_sources:\n"
+                "  - slug: infrastructure\n"
+                "    source_type: manual\n"
+                "    bogus: nope\n",
+                encoding="utf-8",
+            )
+
+            result = load_intent_sources(path)
+
+        self.assertIn(
+            "intent_sources entry 1 has unknown fields: bogus.",
+            result.errors,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

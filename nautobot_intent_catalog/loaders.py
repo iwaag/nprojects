@@ -32,9 +32,16 @@ DEFAULT_BASIC_FILE_PATHS = (
 
 @dataclass(frozen=True)
 class IntentSourceEntry:
-    """One Git repository-style intent source row normalized for display."""
+    """One intent source row normalized for display.
 
-    url: str
+    Git sources are identified by ``url``; manual (URL-less) sources are
+    identified by ``slug``.
+    """
+
+    url: str | None = None
+    slug: str | None = None
+    name: str | None = None
+    source_type: str = "git_repository"
     enabled: bool = True
     ref: str | None = None
     owner: str | None = None
@@ -97,6 +104,32 @@ class DesiredIPRangeEntry:
 
 
 @dataclass(frozen=True)
+class DesiredServiceEntry:
+    """One manually-declared desired service normalized from YAML.
+
+    Identity is ``(intent_source slug, catalog_namespace, catalog_metadata_name,
+    service_type)``, mirroring the model's unique constraint.
+    """
+
+    intent_source: str
+    catalog_metadata_name: str
+    service_type: str
+    name: str
+    slug: str
+    display_name: str
+    catalog_namespace: str = "default"
+    lifecycle: str = "proposed"
+    catalog_kind: str | None = None
+    catalog_owner: str | None = None
+    catalog_lifecycle: str | None = None
+    source_ref: str | None = None
+    source_catalog_path: str | None = None
+    prefers_gpu: bool = False
+    min_memory_gb: float | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
 class DesiredServicePlacementEntry:
     """One explicit desired service placement normalized from YAML."""
 
@@ -138,6 +171,7 @@ class IntentSourceLoadResult:
     desired_nodes: list[DesiredNodeEntry] = field(default_factory=list)
     desired_ip_ranges: list[DesiredIPRangeEntry] = field(default_factory=list)
     desired_endpoints: list[DesiredEndpointEntry] = field(default_factory=list)
+    desired_services: list[DesiredServiceEntry] = field(default_factory=list)
     desired_service_placements: list[DesiredServicePlacementEntry] = field(default_factory=list)
     desired_node_operational_configs: list[DesiredNodeOperationalConfigEntry] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -203,6 +237,7 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
     desired_nodes: list[DesiredNodeEntry] = []
     desired_ip_ranges: list[DesiredIPRangeEntry] = []
     desired_endpoints: list[DesiredEndpointEntry] = []
+    desired_services: list[DesiredServiceEntry] = []
     desired_service_placements: list[DesiredServicePlacementEntry] = []
     desired_node_operational_configs: list[DesiredNodeOperationalConfigEntry] = []
     errors: list[str] = []
@@ -239,6 +274,14 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
             desired_endpoints.append(entry)
         errors.extend(entry_errors)
 
+    raw_services, service_errors = _list_section(data, "desired_services")
+    errors.extend(service_errors)
+    for index, item in enumerate(raw_services, start=1):
+        entry, entry_errors = _normalize_desired_service_entry(item, index)
+        if entry is not None:
+            desired_services.append(entry)
+        errors.extend(entry_errors)
+
     raw_placements, placement_errors = _list_section(data, "desired_service_placements")
     errors.extend(placement_errors)
     for index, item in enumerate(raw_placements, start=1):
@@ -258,6 +301,7 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
             desired_node_operational_configs.append(entry)
         errors.extend(entry_errors)
 
+    errors.extend(_duplicate_service_errors(desired_services))
     errors.extend(_duplicate_placement_errors(desired_service_placements))
     errors.extend(_duplicate_operational_config_errors(desired_node_operational_configs))
 
@@ -267,6 +311,7 @@ def load_intent_sources(path: Path) -> IntentSourceLoadResult:
         desired_nodes=desired_nodes,
         desired_ip_ranges=desired_ip_ranges,
         desired_endpoints=desired_endpoints,
+        desired_services=desired_services,
         desired_service_placements=desired_service_placements,
         desired_node_operational_configs=desired_node_operational_configs,
         errors=errors,
@@ -283,17 +328,42 @@ def _list_section(data: dict[Any, Any], key: str) -> tuple[list[Any], list[str]]
 
 
 def _normalize_intent_source_entry(item: Any, index: int) -> tuple[IntentSourceEntry | None, list[str]]:
-    """Normalize one raw YAML list item."""
+    """Normalize one raw YAML list item.
 
+    Git sources require ``url``; manual (non-Git) sources require ``slug`` and
+    may omit ``url``.
+    """
+
+    section = f"intent_sources entry {index}"
     if isinstance(item, str):
         item = {"url": item}
 
     if not isinstance(item, dict):
         return None, [f"Entry {index} must be a URL string or mapping."]
 
+    unknown = sorted(str(key) for key in item if key not in _INTENT_SOURCE_KEYS)
+    if unknown:
+        return None, [f"{section} has unknown fields: {', '.join(unknown)}."]
+
+    source_type, source_type_error = _choice_with_default_or_error(
+        item.get("source_type"),
+        _INTENT_SOURCE_TYPES,
+        f"{section} source_type",
+        "git_repository",
+    )
+    if source_type_error:
+        return None, [source_type_error]
+
     raw_url = item.get("url")
-    if not raw_url:
-        return None, [f"Entry {index} is missing required field: url."]
+    slug = _optional_str(item.get("slug"))
+    if source_type == "git_repository":
+        if not raw_url:
+            return None, [f"Entry {index} is missing required field: url."]
+    elif not slug:
+        return None, [f"{section} is missing required field: slug."]
+
+    if slug and not _SLUG_RE.fullmatch(slug):
+        return None, [f"{section} slug must be a lowercase slug."]
 
     catalog_paths, catalog_paths_defaulted = _string_list_with_default(
         item,
@@ -308,7 +378,10 @@ def _normalize_intent_source_entry(item: Any, index: int) -> tuple[IntentSourceE
 
     return (
         IntentSourceEntry(
-            url=str(raw_url),
+            url=str(raw_url) if raw_url else None,
+            slug=slug,
+            name=_optional_str(item.get("name")),
+            source_type=source_type,
             enabled=_as_bool(item.get("enabled", True)),
             ref=_optional_str(item.get("ref")),
             owner=_optional_str(item.get("owner")),
@@ -426,6 +499,111 @@ def _normalize_desired_endpoint_entry(item: Any, index: int) -> tuple[DesiredEnd
             ip_policy=ip_policy,
             dnsmasq_record_type=_choice(item.get("dnsmasq_record_type"), _DNSMASQ_RECORD_TYPES, "host_record"),
             description=_optional_str(item.get("description")),
+        ),
+        [],
+    )
+
+
+def _normalize_desired_service_entry(item: Any, index: int) -> tuple[DesiredServiceEntry | None, list[str]]:
+    """Normalize one manually-declared desired service YAML item."""
+
+    section = f"desired_services entry {index}"
+    allowed = {
+        "intent_source",
+        "catalog_namespace",
+        "catalog_metadata_name",
+        "service_type",
+        "name",
+        "slug",
+        "display_name",
+        "lifecycle",
+        "catalog_kind",
+        "catalog_owner",
+        "catalog_lifecycle",
+        "source_ref",
+        "source_catalog_path",
+        "prefers_gpu",
+        "min_memory_gb",
+        "notes",
+    }
+    required = {
+        "intent_source",
+        "catalog_metadata_name",
+        "service_type",
+        "name",
+        "display_name",
+    }
+    errors = _strict_mapping_errors(item, section, allowed, required)
+    if errors:
+        return None, errors
+
+    intent_source = _strict_slug(item.get("intent_source"), f"{section} intent_source", errors)
+    catalog_metadata_name = _strict_nonempty_string(
+        item.get("catalog_metadata_name"),
+        f"{section} catalog_metadata_name",
+        errors,
+    )
+    service_type = _strict_choice(item.get("service_type"), _SERVICE_TYPES, f"{section} service_type", errors)
+    name = _strict_slug(item.get("name"), f"{section} name", errors)
+    display_name = _strict_nonempty_string(item.get("display_name"), f"{section} display_name", errors)
+
+    if "catalog_namespace" in item:
+        catalog_namespace = _strict_nonempty_string(
+            item.get("catalog_namespace"),
+            f"{section} catalog_namespace",
+            errors,
+        )
+    else:
+        catalog_namespace = "default"
+
+    if "slug" in item:
+        slug = _strict_slug(item.get("slug"), f"{section} slug", errors)
+    else:
+        slug = _slug_from_text(name, "desired-service") if name else ""
+
+    lifecycle = "proposed"
+    if "lifecycle" in item:
+        lifecycle = _strict_choice(item.get("lifecycle"), _LIFECYCLES_SERVICE, f"{section} lifecycle", errors)
+
+    catalog_kind = _strict_optional_string(item.get("catalog_kind"), f"{section} catalog_kind", errors)
+    catalog_owner = _strict_optional_string(item.get("catalog_owner"), f"{section} catalog_owner", errors)
+    catalog_lifecycle = _strict_optional_string(item.get("catalog_lifecycle"), f"{section} catalog_lifecycle", errors)
+    source_ref = _strict_optional_string(item.get("source_ref"), f"{section} source_ref", errors)
+    source_catalog_path = _strict_optional_string(
+        item.get("source_catalog_path"),
+        f"{section} source_catalog_path",
+        errors,
+    )
+    notes = _strict_optional_string(item.get("notes"), f"{section} notes", errors)
+
+    prefers_gpu = item.get("prefers_gpu", False)
+    if not isinstance(prefers_gpu, bool):
+        errors.append(f"{section} prefers_gpu must be a boolean.")
+        prefers_gpu = False
+
+    min_memory_gb = _optional_number(item.get("min_memory_gb"), f"{section} min_memory_gb", errors)
+
+    if errors:
+        return None, errors
+
+    return (
+        DesiredServiceEntry(
+            intent_source=intent_source,
+            catalog_metadata_name=catalog_metadata_name,
+            service_type=service_type,
+            name=name,
+            slug=slug,
+            display_name=display_name,
+            catalog_namespace=catalog_namespace,
+            lifecycle=lifecycle,
+            catalog_kind=catalog_kind,
+            catalog_owner=catalog_owner,
+            catalog_lifecycle=catalog_lifecycle,
+            source_ref=source_ref,
+            source_catalog_path=source_catalog_path,
+            prefers_gpu=prefers_gpu,
+            min_memory_gb=min_memory_gb,
+            notes=notes,
         ),
         [],
     )
@@ -876,6 +1054,38 @@ def _optional_endpoint_reference(
         return None
 
 
+def _optional_number(value: Any, field_name: str, errors: list[str]) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        errors.append(f"{field_name} must be a number.")
+        return None
+    if value < 0:
+        errors.append(f"{field_name} must not be negative.")
+        return None
+    return float(value)
+
+
+def _duplicate_service_errors(entries: list[DesiredServiceEntry]) -> list[str]:
+    seen = set()
+    errors = []
+    for entry in entries:
+        key = (
+            entry.intent_source,
+            entry.catalog_namespace,
+            entry.catalog_metadata_name,
+            entry.service_type,
+        )
+        if key in seen:
+            errors.append(
+                "desired_services contains duplicate "
+                "(intent_source, catalog_namespace, catalog_metadata_name, service_type): "
+                f"{entry.intent_source}/{entry.catalog_namespace}/{entry.catalog_metadata_name}/{entry.service_type}."
+            )
+        seen.add(key)
+    return errors
+
+
 def _duplicate_placement_errors(entries: list[DesiredServicePlacementEntry]) -> list[str]:
     seen = set()
     errors = []
@@ -931,6 +1141,20 @@ def _resolve_configured_path(value: str | Path) -> Path:
     return Path.cwd() / path
 
 
+_INTENT_SOURCE_TYPES = {"git_repository", "manual"}
+_INTENT_SOURCE_KEYS = {
+    "url",
+    "slug",
+    "name",
+    "source_type",
+    "enabled",
+    "ref",
+    "owner",
+    "service_hint",
+    "catalog_paths",
+    "basic_file_paths",
+    "raw_url_template",
+}
 _NODE_TYPES = {"device", "virtual_machine", "container", "service_host"}
 _ACTUAL_TYPES = {"device", "virtual_machine", "container"}
 _ACTUAL_TYPE_DEFAULTS = {
@@ -940,6 +1164,8 @@ _ACTUAL_TYPE_DEFAULTS = {
     "service_host": ("device", "virtual_machine", "container"),
 }
 _LIFECYCLES = {"planned", "approved", "active", "deprecated", "retired"}
+_LIFECYCLES_SERVICE = _LIFECYCLES | {"proposed"}
+_SERVICE_TYPES = {"service", "website", "worker", "database", "queue", "storage", "agent", "other"}
 _ENDPOINT_TYPES = {"primary", "management", "service", "vpn", "mdns", "other"}
 _DNSMASQ_RECORD_TYPES = {"host_record", "address", "cname"}
 _IP_POLICIES = {"static", "dhcp_reserved", "external"}

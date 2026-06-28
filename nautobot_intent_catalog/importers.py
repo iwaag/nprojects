@@ -12,6 +12,7 @@ from .loaders import (
     DesiredIPRangeEntry,
     DesiredNodeEntry,
     DesiredNodeOperationalConfigEntry,
+    DesiredServiceEntry,
     DesiredServicePlacementEntry,
     IntentSourceEntry,
 )
@@ -29,14 +30,23 @@ SOURCE_CONFIG_FIELDS = (
 
 
 def intent_source_defaults(source: IntentSourceEntry) -> dict[str, Any]:
-    """Return model defaults for an intent source loader entry."""
+    """Return model defaults for an intent source loader entry.
+
+    Git sources derive name/slug from the ``url`` when unset; manual sources are
+    identified by an explicit ``slug``.
+    """
 
     data = asdict(source)
-    name = data.get("service_hint") or _name_from_url(source.url)
+    if source.source_type == "git_repository":
+        name = data.get("service_hint") or source.name or _name_from_url(source.url)
+        slug = source.slug or _slug_from_text(name or source.url)
+    else:
+        name = source.name or data.get("service_hint") or source.slug
+        slug = source.slug
     return {
         "name": name,
-        "slug": _slug_from_text(name or source.url),
-        "source_type": "git_repository",
+        "slug": slug,
+        "source_type": source.source_type,
         "enabled": data["enabled"],
         "ref": data["ref"],
         "owner": data["owner"],
@@ -90,6 +100,38 @@ def desired_service_defaults(service: dict[str, Any]) -> dict[str, Any]:
         },
         "placement_policy": {},
         "notes": _optional_str(service.get("notes")),
+    }
+
+
+def desired_service_entry_identity(entry: DesiredServiceEntry, intent_source_id: Any) -> dict[str, Any]:
+    """Return the stable identity fields for a manually-declared desired service."""
+
+    return {
+        "intent_source_id": intent_source_id,
+        "catalog_namespace": entry.catalog_namespace,
+        "catalog_metadata_name": entry.catalog_metadata_name,
+        "service_type": entry.service_type,
+    }
+
+
+def desired_service_entry_defaults(entry: DesiredServiceEntry) -> dict[str, Any]:
+    """Return model defaults for a manually-declared desired service loader entry."""
+
+    return {
+        "name": entry.name,
+        "slug": entry.slug,
+        "display_name": entry.display_name,
+        "lifecycle": entry.lifecycle,
+        "source_ref": entry.source_ref,
+        "source_catalog_path": entry.source_catalog_path,
+        "catalog_kind": entry.catalog_kind,
+        "catalog_owner": entry.catalog_owner,
+        "catalog_lifecycle": entry.catalog_lifecycle,
+        "prefers_gpu": entry.prefers_gpu,
+        "min_memory_gb": entry.min_memory_gb,
+        "requirements": {},
+        "placement_policy": {},
+        "notes": entry.notes,
     }
 
 
