@@ -69,6 +69,11 @@ if hasattr(views, "IntentSourceListView"):
                 name="desiredserviceplacement_list",
             ),
             path(
+                "placements/quick-add/",
+                views.DesiredServicePlacementQuickAddView.as_view(),
+                name="desiredserviceplacement_quick_add",
+            ),
+            path(
                 "placements/add/",
                 views.DesiredServicePlacementEditView.as_view(),
                 name="desiredserviceplacement_add",

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ipaddress
 
+from .production_inventory_contract import PRODUCTION_PROFILE_CONTRACT_VERSION
+
 
 def _endpoint_has_usable_ip(endpoint) -> bool:
     value = getattr(endpoint, "ip_address", None)
@@ -484,7 +486,10 @@ else:
         )
         instance_role = models.CharField(max_length=64, blank=True, null=True)
         deployment_profile = models.SlugField(max_length=255)
-        config_schema_version = models.CharField(max_length=64)
+        config_schema_version = models.CharField(
+            max_length=64,
+            default=PRODUCTION_PROFILE_CONTRACT_VERSION,
+        )
         config = models.JSONField(default=dict, blank=True)
         assignment_source = models.CharField(
             max_length=32,

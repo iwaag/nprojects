@@ -41,6 +41,10 @@ else:
                             name="Service Placements",
                         ),
                         NavMenuItem(
+                            link="plugins:nautobot_intent_catalog:desiredserviceplacement_quick_add",
+                            name="Quick Service Placement",
+                        ),
+                        NavMenuItem(
                             link="plugins:nautobot_intent_catalog:desirednodeoperationalconfig_list",
                             name="Node Operational Configs",
                         ),
