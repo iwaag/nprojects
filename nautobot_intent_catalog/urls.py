@@ -21,6 +21,7 @@ if hasattr(views, "IntentSourceListView"):
                 name="intentsource_delete",
             ),
             path("services/", views.DesiredServiceListView.as_view(), name="desiredservice_list"),
+            path("services/add/", views.DesiredServiceEditView.as_view(), name="desiredservice_add"),
             path("services/<uuid:pk>/", views.DesiredServiceView.as_view(), name="desiredservice"),
             path("services/<uuid:pk>/edit/", views.DesiredServiceEditView.as_view(), name="desiredservice_edit"),
             path(
