@@ -822,3 +822,37 @@ else:
 
         def get_absolute_url(self) -> str:
             return reverse("plugins:nautobot_intent_catalog:intentevaluation", args=[self.pk])
+
+
+    class DeploymentProfileProjection(PrimaryModel):
+        """Read-only projection of the Ansible-owned deployment_profiles map.
+
+        The authoritative owner of ``deployment_profiles`` stays on the Ansible
+        side (``ansible_agdev`` ``vars/deployment_profiles.yml``).  This model is
+        an advisory, digest-keyed snapshot synced through the same export-input
+        contract so forms and operations can read profile choices and config
+        schemas at runtime.  It is intentionally not editable through the UI and
+        never used as an authoritative copy; export still revalidates the map.
+        """
+
+        digest = models.CharField(max_length=64, unique=True)
+        profiles = models.JSONField(default=dict, blank=True)
+        synced_at = models.DateTimeField()
+
+        class Meta:
+            ordering = ("-synced_at",)
+            verbose_name = "deployment profile projection"
+            verbose_name_plural = "deployment profile projections"
+            constraints = (
+                models.CheckConstraint(
+                    check=models.expressions.RawSQL(
+                        "jsonb_typeof(profiles) = 'object'",
+                        (),
+                        output_field=models.BooleanField(),
+                    ),
+                    name="nic_profile_projection_object",
+                ),
+            )
+
+        def __str__(self) -> str:
+            return f"deployment profiles {self.digest[:12]} ({len(self.profiles or {})} profiles)"

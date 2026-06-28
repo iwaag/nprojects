@@ -59,6 +59,7 @@ try:
     from nautobot.virtualization.models import VirtualMachine
 
     from .models import (
+        DeploymentProfileProjection,
         DesiredDependency,
         DesiredEndpoint,
         DesiredIPRange,
@@ -644,6 +645,50 @@ else:
                     "Production inventory drift: %s", _json(composition.report["drift"])
                 )
 
+    class SyncDeploymentProfiles(Job):
+        """Sync the read-only deployment_profiles projection from Ansible input."""
+
+        deployment_profiles_json = StringVar(
+            description=(
+                "Canonical deployment_profiles JSON from the ansible_agdev "
+                "vars/deployment_profiles.yml mapping, serialized with the Job-input byte contract."
+            ),
+        )
+        deployment_profiles_digest = StringVar(
+            description="SHA-256 hex digest of the canonical deployment_profiles JSON payload.",
+        )
+
+        class Meta:
+            name = "Sync Deployment Profiles"
+            description = (
+                "Project the Ansible-owned deployment_profiles map into a read-only, digest-keyed "
+                "snapshot for UI and early validation. Ansible stays the authoritative owner."
+            )
+            has_sensitive_variables = False
+
+        def run(self, deployment_profiles_json: str, deployment_profiles_digest: str) -> None:
+            # Share export's ingestion contract so the projection can never accept
+            # a payload that export validation would reject.
+            profiles = parse_profile_job_input(deployment_profiles_json, deployment_profiles_digest)
+            now = timezone.now()
+            with transaction.atomic():
+                # Keep a single current projection; older digests are advisory history only.
+                DeploymentProfileProjection.objects.exclude(digest=deployment_profiles_digest).delete()
+                _projection, created = DeploymentProfileProjection.objects.update_or_create(
+                    digest=deployment_profiles_digest,
+                    defaults={"profiles": profiles, "synced_at": now},
+                )
+            self.logger.info(
+                "Deployment profiles sync summary: %s",
+                _json(
+                    {
+                        "deployment_profile_digest": deployment_profiles_digest,
+                        "profiles": len(profiles),
+                        "created": bool(created),
+                    }
+                ),
+            )
+
     jobs = (
         PreviewIntentSourceAnalysis,
         ImportIntentSources,
@@ -654,6 +699,7 @@ else:
         ExportDnsmasqRecords,
         ExportAnsibleHostsIntent,
         ExportProductionInventory,
+        SyncDeploymentProfiles,
         ReconcileDesiredIPAMIntent,
     )
     register_jobs(*jobs)
